@@ -1,5 +1,5 @@
 /* Offline support: serve app files from cache, update them in the background. */
-const CACHE = 'gymlog-v2';
+const CACHE = 'gymlog-v5';
 // './index.html' is not listed: hosts like Cloudflare Pages redirect it to './',
 // and Safari refuses to show a redirected response served by a service worker.
 const FILES = [
@@ -21,7 +21,7 @@ self.addEventListener('install', function (event) {
 self.addEventListener('activate', function (event) {
   event.waitUntil(
     caches.keys().then(function (keys) {
-      return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+      return Promise.all(keys.filter(function (k) { return k.startsWith('gymlog-') && k !== CACHE; }).map(function (k) { return caches.delete(k); }));
     }).then(function () { return self.clients.claim(); })
   );
 });
@@ -34,12 +34,14 @@ self.addEventListener('fetch', function (event) {
     fetch(req).then(function (res) {
       if (res && res.ok && !res.redirected) {
         const copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        event.waitUntil(caches.open(CACHE).then(function (c) { return c.put(req, copy); }));
       }
       return res;
     }).catch(function () {
       return caches.match(req, { ignoreSearch: true }).then(function (hit) {
-        return hit || caches.match('./');
+        if (hit) return hit;
+        if (req.mode === 'navigate') return caches.match('./');
+        return Response.error();
       });
     })
   );

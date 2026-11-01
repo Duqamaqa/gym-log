@@ -118,3 +118,60 @@ test('normalizeData validates backups', function () {
   assert.equal(dup.unit, 'kg');
   assert.notEqual(dup.workouts[0].id, dup.workouts[1].id);
 });
+
+
+test('unit conversion preserves every session, bodyweight and repeated round trips', function () {
+  const original = { version: 1, unit: 'kg', workouts: [wk('a', '2026-01-01', [
+    { name: 'Bench', sets: [{ w: 62.5, r: 8 }, { w: 2000, r: 1 }] },
+    { name: 'Pull-up', sets: [{ w: 0, r: 12 }] },
+  ])] };
+  let converted = L.convertUnit(original, 'lb');
+  assert.equal(L.fmtNum(converted.workouts[0].exercises[0].sets[0].w), '137.79');
+  assert.equal(converted.workouts[0].exercises[1].sets[0].w, 0);
+  assert.equal(original.unit, 'kg', 'conversion does not mutate the source');
+  assert.equal(original.workouts[0].exercises[0].sets[0].w, 62.5);
+  for (let i = 0; i < 100; i++) {
+    converted = L.convertUnit(L.normalizeData(JSON.parse(JSON.stringify(converted))), 'kg');
+    converted = L.convertUnit(converted, 'lb');
+  }
+  const restored = L.convertUnit(converted, 'kg');
+  assert.ok(Math.abs(restored.workouts[0].exercises[0].sets[0].w - 62.5) < 1e-9);
+  assert.ok(Math.abs(restored.workouts[0].exercises[0].sets[1].w - 2000) < 1e-9);
+  assert.throws(function () { L.convertUnit(original, 'stone'); }, /Unknown/);
+});
+
+test('pound inputs and backups support the same physical weight range as kilograms', function () {
+  assert.equal(L.validateSetInput('4000', '1', 'lb').ok, true);
+  assert.equal(L.validateSetInput('4000', '1', 'kg').ok, false);
+  assert.equal(L.validateSetInput('5000', '1', 'lb').ok, false);
+  const source = { version: 1, unit: 'lb', workouts: [wk('a', '2026-01-01', [{ name: 'Lift', sets: [{ w: 4000, r: 1 }] }])] };
+  assert.equal(L.normalizeData(source).workouts[0].exercises[0].sets[0].w, 4000);
+});
+
+test('targets stay inside the supported input limits', function () {
+  const target = L.suggestNext([{ w: 2000, r: 1000 }], 'kg');
+  assert.equal(target.moreReps, null);
+  assert.equal(target.moreWeight, null);
+  assert.equal(L.suggestNext([{ w: 0, r: 1000 }], 'kg').moreReps, null);
+});
+
+test('future backup formats are rejected instead of silently losing unknown fields', function () {
+  assert.throws(function () { L.normalizeData({ version: 2, workouts: [] }); }, /Unsupported backup version/);
+});
+
+
+test('unit-conversion float noise does not mark equal sets as a personal best', function () {
+  assert.deepEqual(L.describeChange({ w: 60.00000000000001, r: 8 }, { w: 60, r: 8 }, 'kg'), { status: 'same', text: 'same' });
+  assert.equal(L.describeChange({ w: 60.00000000000001, r: 9 }, { w: 60, r: 8 }, 'kg').status, 'up');
+  assert.equal(L.validateSetInput('4409.245', '1', 'lb').ok, true);
+  const set = L.validateSetInput('4409.245', '1', 'lb').set;
+  assert.doesNotThrow(function () { L.normalizeData({ unit: 'lb', workouts: [wk('a', '2026-01-01', [{ name: 'Lift', sets: [set] }])] }); });
+});
+
+
+test('rounded maximum pound input remains valid after converting back to kilograms', function () {
+  const data = { unit: 'lb', workouts: [wk('a', '2026-01-01', [{ name: 'Lift', sets: [{ w: 4409.25, r: 1 }] }])] };
+  const kilograms = L.convertUnit(data, 'kg');
+  assert.equal(kilograms.workouts[0].exercises[0].sets[0].w, 2000);
+  assert.doesNotThrow(function () { L.normalizeData(kilograms); });
+});

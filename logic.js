@@ -14,6 +14,24 @@
   const SCHEMA_VERSION = 1;
   const MAX_WEIGHT = 2000;
   const MAX_REPS = 1000;
+  const LB_PER_KG = 2.2046226218487757;
+
+  function maxWeight(unit) { return unit === 'lb' ? round2(MAX_WEIGHT * LB_PER_KG) : MAX_WEIGHT; }
+
+  // Keep full precision in storage so switching units repeatedly does not drift.
+  function convertUnit(data, unit) {
+    if (unit !== 'kg' && unit !== 'lb') throw new Error('Unknown weight unit.');
+    const copy = normalizeData(data);
+    if (copy.unit === unit) return copy;
+    const factor = unit === 'lb' ? LB_PER_KG : 1 / LB_PER_KG;
+    copy.workouts.forEach(function (w) {
+      w.exercises.forEach(function (e) {
+        e.sets.forEach(function (set) { set.w = Math.min(set.w * factor, maxWeight(unit)); });
+      });
+    });
+    copy.unit = unit;
+    return copy;
+  }
 
   /** Exercise names are matched case-insensitively and ignoring extra spaces. */
   function cleanName(name) {
@@ -66,11 +84,11 @@
    * Validates a set typed by the user. Empty weight = 0 (bodyweight exercise).
    * Returns { ok: true, set } or { ok: false, error }.
    */
-  function validateSetInput(weightInput, repsInput) {
+  function validateSetInput(weightInput, repsInput, unit) {
     const w = String(weightInput == null ? '' : weightInput).trim() === '' ? 0 : parseNum(weightInput);
     const r = parseNum(repsInput);
-    if (!Number.isFinite(w) || w < 0 || w > MAX_WEIGHT) {
-      return { ok: false, error: 'Enter a weight between 0 and ' + MAX_WEIGHT + '.' };
+    if (!Number.isFinite(w) || w < 0 || w > maxWeight(unit)) {
+      return { ok: false, error: 'Enter a weight between 0 and ' + fmtNum(maxWeight(unit)) + '.' };
     }
     if (!Number.isInteger(r) || r < 1 || r > MAX_REPS) {
       return { ok: false, error: 'Enter reps as a whole number (1 or more).' };
@@ -87,7 +105,7 @@
 
   /** Positive when set a is stronger than set b. */
   function compareSetStrength(a, b) {
-    if (a.w === b.w) return a.r - b.r;
+    if (Math.abs(a.w - b.w) < 0.005) return a.r - b.r;
     const diff = e1rm(a.w, a.r) - e1rm(b.w, b.r);
     if (Math.abs(diff) > 1e-9) return diff;
     return a.w - b.w;
@@ -164,12 +182,12 @@
       return s.w > m.w || (s.w === m.w && s.r > m.r) ? s : m;
     });
     if (!(top.w > 0)) {
-      return { moreReps: { w: 0, r: top.r + 1 }, moreWeight: null };
+      return { moreReps: top.r < MAX_REPS ? { w: 0, r: top.r + 1 } : null, moreWeight: null };
     }
     const inc = unit === 'lb' ? 5 : 2.5;
     return {
-      moreReps: { w: top.w, r: top.r + 1 },
-      moreWeight: { w: round2(top.w + inc), r: top.r },
+      moreReps: top.r < MAX_REPS ? { w: top.w, r: top.r + 1 } : null,
+      moreWeight: top.w + inc <= maxWeight(unit) ? { w: round2(top.w + inc), r: top.r } : null,
     };
   }
 
@@ -241,6 +259,7 @@
     if (!raw || typeof raw !== 'object' || !Array.isArray(raw.workouts)) {
       throw new Error('This file is not a Gym Log backup.');
     }
+    if (raw.version != null && raw.version !== SCHEMA_VERSION) throw new Error('Unsupported backup version.');
     const unit = raw.unit === 'lb' ? 'lb' : 'kg';
     const seen = new Set();
     const workouts = raw.workouts.map(function (w, i) {
@@ -262,10 +281,10 @@
           return {
             name: name,
             sets: e.sets.map(function (s) {
-              const ok = s && Number.isFinite(s.w) && s.w >= 0 && s.w <= MAX_WEIGHT &&
+              const ok = s && Number.isFinite(s.w) && s.w >= 0 && s.w <= maxWeight(unit) + 1e-9 &&
                 Number.isInteger(s.r) && s.r >= 1 && s.r <= MAX_REPS;
               if (!ok) throw new Error('A set of ' + name + ' on ' + w.date + ' is damaged.');
-              return { w: round2(s.w), r: s.r };
+              return { w: s.w, r: s.r };
             }),
           };
         }),
@@ -276,6 +295,7 @@
 
   return {
     SCHEMA_VERSION: SCHEMA_VERSION,
+    convertUnit: convertUnit,
     cleanName: cleanName,
     keyOf: keyOf,
     newId: newId,

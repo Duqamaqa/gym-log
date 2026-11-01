@@ -5,7 +5,7 @@ A free, simple workout log for progressive overload. Built for iPhone, and it wo
 - **Today**: add exercises and log each set (weight × reps). Under every exercise it shows what you did **last time** and a **"Beat it"** target.
 - **Progress**: for each exercise you see your best set, estimated 1-rep max, and how it changed over time.
 - **History**: every past workout, by date.
-- **Settings**: kg/lb, save or restore a backup file, delete data.
+- **Settings**: kg/lb with automatic conversion of saved weights, save or restore a backup file, delete data.
 
 There are no accounts, no ads, no subscriptions and no server. Your data stays on your phone (in the browser's localStorage).
 
@@ -49,3 +49,21 @@ PLAYWRIGHT=/path/to/node_modules/playwright node tests/e2e.js   # browser test, 
 - `logic.js`: pure logic (last-time lookup, targets, 1RM, data validation)
 - `sw.js`, `manifest.webmanifest`, `icons/`: offline support and "Add to Home Screen"
 - `tools/make-icons.js`: regenerates the icons
+
+## Visual direction
+
+An editorial training journal: warm paper, oxblood accents, serif headlines,
+numbered exercises, quiet session totals, and an original inline SVG weight plate.
+Desktop uses margin navigation and a journal note; phones use bottom navigation.
+Light and dark themes follow the device. All artwork and fonts work offline.
+
+Progress targets are simple optional increments, not personalized training advice.
+Changing units converts all saved weights, retaining full precision in backups.
+Unsubmitted set drafts survive navigation during the current session; they are not
+saved across a reload. If browser storage fails, the app keeps the last saved log
+and reports the failure instead of claiming the change was saved.
+
+The interface uses plain instructions and readable control labels. Workout values
+include units and repetitions, set actions are labeled Save/Delete, and controls
+remain at least 44px tall. Functional UI text is at least 14px; smaller lettering
+is confined to decorative artwork. On phones, the save action has a full-width row.

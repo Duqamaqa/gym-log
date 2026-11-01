@@ -29,6 +29,8 @@
 
   // ---------- storage ----------
   let data = load();
+  let savedJSON = JSON.stringify(data);
+  const drafts = new Map();
 
   function load() {
     try {
@@ -44,10 +46,13 @@
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      const json = JSON.stringify(data);
+      localStorage.setItem(STORAGE_KEY, json);
+      savedJSON = json;
       return true;
     } catch (err) {
-      toast('Could not save! Storage is full or blocked.');
+      data = JSON.parse(savedJSON);
+      toast('Could not save. Storage is full or blocked. Your previous log is unchanged.');
       return false;
     }
   }
@@ -61,11 +66,11 @@
   const unit = function () { return data.unit; };
 
   function fmtSet(s) {
-    return s.w > 0 ? L.fmtNum(s.w) + ' ' + unit() + ' × ' + s.r : 'Bodyweight × ' + s.r;
+    return s.w > 0 ? L.fmtNum(s.w) + ' ' + unit() + ' × ' + s.r + ' reps' : 'Bodyweight × ' + s.r + ' reps';
   }
 
   function fmtSetShort(s) {
-    return s.w > 0 ? L.fmtNum(s.w) + '×' + s.r : 'BW×' + s.r;
+    return fmtSet(s);
   }
 
   function fmtDate(iso, opts) {
@@ -111,7 +116,7 @@
   document.querySelectorAll('.tabbar button').forEach(function (b) {
     b.addEventListener('click', function () {
       const tab = b.getAttribute('data-tab');
-      if (tab === 'workout' && ui.tab === 'workout') ui.date = L.todayISO();
+      if (tab === 'workout') ui.date = L.todayISO();
       if (tab === 'progress') ui.progressKey = null;
       go(tab);
     });
@@ -120,11 +125,19 @@
   function render() {
     const view = document.getElementById('view');
     const title = document.getElementById('title');
+    const eyebrow = document.getElementById('eyebrow-right');
     view.replaceChildren();
+    document.body.dataset.view = ui.tab;
+    const n = data.workouts.filter(function (w) { return w.exercises.some(function (e) { return e.sets.length; }); }).length;
+    eyebrow.textContent = ui.tab === 'workout'
+      ? fmtDate(ui.date, { day: 'numeric', month: 'short', year: 'numeric' })
+      : n + (n === 1 ? ' workout' : ' workouts');
     document.querySelectorAll('.tabbar button').forEach(function (b) {
       if (b.getAttribute('data-tab') === ui.tab) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
+    document.getElementById('chapter').textContent = { workout: 'Workout log', progress: 'Exercise progress', history: 'Past workouts', settings: 'Preferences & backup' }[ui.tab];
+    document.getElementById('page-note').textContent = { workout: 'Add exercises and save each set.', progress: 'Choose an exercise to compare your weights and repetitions over time.', history: 'Open a past workout to review or edit your sets.', settings: 'Change weight units, back up your workouts, or restore a saved file.' }[ui.tab];
     if (ui.tab === 'workout') {
       title.textContent = ui.date === L.todayISO() ? 'Today' : 'Workout';
       renderWorkout(view);
@@ -156,6 +169,22 @@
     }
   }
 
+  function plateIllustration() {
+    const art = s('svg', { viewBox: '0 0 360 220', class: 'plate-art', 'aria-hidden': 'true' });
+    art.append(s('path', { d: 'M35 190H325M180 28V204', class: 'art-guide' }));
+    art.append(s('path', { d: 'M58 155L295 69', class: 'art-bar' }));
+    const group = s('g', { transform: 'rotate(-20 180 110)' });
+    group.append(s('ellipse', { cx: 180, cy: 110, rx: 83, ry: 91, class: 'plate-side' }));
+    group.append(s('ellipse', { cx: 168, cy: 106, rx: 80, ry: 91, class: 'plate-face' }));
+    [66, 53].forEach(function (r) { group.append(s('ellipse', { cx: 168, cy: 106, rx: r, ry: r * 1.13, class: 'plate-ring' })); });
+    group.append(s('ellipse', { cx: 168, cy: 106, rx: 17, ry: 20, class: 'plate-hole' }));
+    group.append(s('text', { x: 168, y: 64, 'text-anchor': 'middle', class: 'plate-word' }, 'GYM LOG'));
+    group.append(s('text', { x: 168, y: 161, 'text-anchor': 'middle', class: 'plate-number' }, '01'));
+    art.append(group);
+    art.append(s('text', { x: 278, y: 188, class: 'art-caption' }, 'EST. TODAY'));
+    return art;
+  }
+
   // ---------- TODAY / WORKOUT ----------
   let focusAfterRender = null; // exercise key whose reps field should get focus
 
@@ -165,22 +194,32 @@
     const dateInput = h('input', {
       type: 'date', id: 'workout-date', value: ui.date, max: L.todayISO(),
       onchange: function (e) {
-        if (L.isISODate(e.target.value)) { ui.date = e.target.value; render(); }
+        if (L.isISODate(e.target.value) && e.target.value <= L.todayISO()) { ui.date = e.target.value; render(); }
+        else e.target.value = ui.date;
       },
     });
     view.append(h('div', { class: 'date-row' }, h('label', { for: 'workout-date', text: 'Date' }), dateInput));
 
+    const exercises = w ? w.exercises : [];
+    const sets = exercises.reduce(function (n, e) { return n + e.sets.length; }, 0);
+    view.append(h('div', { class: 'session-strip', 'aria-label': 'Session summary' },
+      h('span', null, h('b', { text: String(exercises.length) }), exercises.length === 1 ? ' exercise' : ' exercises'),
+      h('span', null, h('b', { text: String(sets) }), sets === 1 ? ' set saved' : ' sets saved')
+    ));
     if (!w || w.exercises.length === 0) {
       view.append(h('div', { class: 'card empty' },
-        h('div', { class: 'big', 'aria-hidden': 'true', text: '🏋️' }),
+        plateIllustration(),
         h('p', null, h('strong', { text: 'No exercises yet' })),
-        h('p', { class: 'muted', text: 'Tap “Add exercise”, then write the weight and reps of every set.' })
+        h('p', { class: 'muted', text: 'Tap Add exercise to start logging this workout.' })
       ));
     } else {
-      w.exercises.forEach(function (ex) { view.append(exerciseCard(w, ex)); });
+      w.exercises.forEach(function (ex, i) { view.append(exerciseCard(w, ex, i)); });
     }
 
-    view.append(h('button', { type: 'button', class: 'btn primary block', id: 'add-exercise', onclick: openAddDialog }, '＋ Add exercise'));
+    const addButton = h('button', { type: 'button', class: 'btn primary block', id: 'add-exercise', onclick: openAddDialog }, '＋ Add exercise');
+    const emptyState = view.querySelector('.empty');
+    if (emptyState) view.insertBefore(addButton, emptyState);
+    else view.append(addButton);
 
     if (focusAfterRender) {
       const target = view.querySelector('[data-reps-for="' + CSS.escape(focusAfterRender) + '"]');
@@ -189,15 +228,16 @@
     }
   }
 
-  function exerciseCard(w, ex) {
+  function exerciseCard(w, ex, index) {
     const prev = L.previousPerformance(data.workouts, ex.name, w);
     const key = L.keyOf(ex.name);
 
-    const card = h('section', { class: 'card', 'aria-label': ex.name });
+    const card = h('section', { class: 'card exercise-card', 'aria-label': ex.name });
+    card.append(h('div', { class: 'exercise-index', text: 'Exercise ' + (index + 1) }));
     card.append(h('div', { class: 'card-head' },
       h('h2', { text: ex.name }),
       h('button', {
-        type: 'button', class: 'icon-btn', 'aria-label': 'Remove ' + ex.name, text: '🗑',
+        type: 'button', class: 'icon-btn remove-exercise', 'aria-label': 'Remove ' + ex.name,
         onclick: function () {
           const msg = ex.sets.length
             ? 'Remove “' + ex.name + '” and its ' + ex.sets.length + ' set(s) from this workout?'
@@ -208,16 +248,19 @@
           save();
           render();
         },
-      })
+      }, 'Remove')
     ));
 
     if (prev) {
       const sug = L.suggestNext(prev.sets, unit());
-      const goalText = sug.moreWeight ? fmtSet(sug.moreReps) + '  or  ' + fmtSet(sug.moreWeight) : fmtSet(sug.moreReps);
+      const goal = h('div', { class: 'goal' }, h('span', { class: 'goal-k', text: 'Suggested next set: ' }));
+      if (sug.moreReps) goal.append(h('mark', { text: fmtSet(sug.moreReps) }));
+      if (sug.moreWeight) goal.append(sug.moreReps ? ' or ' : '', h('mark', { text: fmtSet(sug.moreWeight) }));
+      if (!sug.moreReps && !sug.moreWeight) goal.append('At the logging limit.');
       card.append(h('div', { class: 'last-time' },
         h('strong', { text: 'Last time · ' + relDate(prev.date) }),
-        h('div', { text: prev.sets.map(fmtSet).join('  ·  ') }),
-        h('div', { class: 'goal', text: '🎯 Beat it: ' + goalText })
+        h('div', { class: 'lt-sets', text: prev.sets.map(fmtSet).join('  ·  ') }),
+        goal
       ));
     } else {
       card.append(h('p', { class: 'muted small', text: 'First time — this will be your starting point.' }));
@@ -229,16 +272,16 @@
         const ch = L.describeChange(s, prev && prev.sets[i], unit());
         const arrow = ch.status === 'up' ? '▲ ' : ch.status === 'down' ? '▼ ' : '';
         list.append(h('li', null,
-          h('span', { class: 'num', text: String(i + 1) }),
+          h('span', { class: 'num', text: 'Set ' + (i + 1) }),
           h('span', { class: 'val', text: fmtSet(s) }),
           prev ? h('span', { class: 'badge ' + ch.status, text: arrow + ch.text }) : null,
           h('button', {
-            type: 'button', class: 'icon-btn', 'aria-label': 'Delete set ' + (i + 1), text: '✕',
+            type: 'button', class: 'icon-btn', 'aria-label': 'Delete set ' + (i + 1), text: 'Delete',
             onclick: function () {
               ex.sets.splice(i, 1);
-              save();
+              const saved = save();
               render();
-              toast('Set deleted');
+              if (saved) toast('Set deleted');
             },
           })
         ));
@@ -249,34 +292,38 @@
     // Prefill with the matching set from last time, else the previous set today.
     const n = ex.sets.length;
     const guess = (prev && prev.sets[n]) || ex.sets[n - 1] || (prev && prev.sets[prev.sets.length - 1]) || null;
-    const idBase = 'f-' + w.id + '-' + key.replace(/[^a-z0-9]/g, '_');
+    const idBase = 'f-' + w.id + '-' + index;
+    const draftKey = w.id + ':' + key + ':' + unit();
+    const draft = drafts.get(draftKey);
+    function rememberDraft() { drafts.set(draftKey, { w: wIn.value, r: rIn.value }); }
     const wIn = h('input', {
       id: idBase + '-w', type: 'text', inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next',
-      placeholder: '0', value: guess && guess.w > 0 ? L.fmtNum(guess.w) : '',
+      placeholder: '0', value: draft ? draft.w : guess && guess.w > 0 ? L.fmtNum(guess.w) : '', oninput: rememberDraft,
     });
     const rIn = h('input', {
       id: idBase + '-r', type: 'text', inputmode: 'numeric', autocomplete: 'off', enterkeyhint: 'done',
-      placeholder: '0', value: guess ? String(guess.r) : '', 'data-reps-for': key,
+      placeholder: '0', value: draft ? draft.r : guess ? String(guess.r) : '', 'data-reps-for': key, oninput: rememberDraft,
     });
     const err = h('p', { class: 'form-error', role: 'alert' });
     const form = h('form', {
       class: 'set-form', novalidate: true,
       onsubmit: function (e) {
         e.preventDefault();
-        const res = L.validateSetInput(wIn.value, rIn.value);
+        const res = L.validateSetInput(wIn.value, rIn.value, unit());
         if (!res.ok) { err.textContent = res.error; return; }
         ex.sets.push(res.set);
-        save();
+        if (!save()) { render(); return; }
+        drafts.delete(draftKey);
         render();
         if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         toast('Set ' + ex.sets.length + ' saved: ' + fmtSet(res.set));
       },
     },
       h('div', null, h('label', { for: wIn.id, text: 'Weight (' + unit() + ')' }), wIn),
-      h('div', null, h('label', { for: rIn.id, text: 'Reps' }), rIn),
-      h('button', { type: 'submit', class: 'btn primary', text: '＋ Set ' + (n + 1) })
+      h('div', null, h('label', { for: rIn.id, text: 'Repetitions' }), rIn),
+      h('button', { type: 'submit', class: 'btn primary', text: 'Save set ' + (n + 1) })
     );
-    card.append(form, err);
+    card.append(form, err, h('p', { class: 'muted small bodyweight-hint', text: 'Bodyweight exercise? Leave weight at 0.' }));
     return card;
   }
 
@@ -295,7 +342,7 @@
       // Reuse the earlier spelling so the history of one exercise stays together.
       const known = L.allExerciseNames(data.workouts).find(function (n) { return L.keyOf(n) === L.keyOf(clean); });
       w.exercises.push({ name: known || clean, sets: [] });
-      save();
+      if (!save()) { render(); return; }
     }
     dlg.close();
     focusAfterRender = L.keyOf(clean);
@@ -324,7 +371,10 @@
     addExercise(addName.value);
   });
   document.getElementById('add-cancel').addEventListener('click', function () { dlg.close(); });
-  dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+  dlg.addEventListener('click', function (e) {
+    const box = dlg.getBoundingClientRect();
+    if (e.target === dlg && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom)) dlg.close();
+  });
 
   // ---------- PROGRESS ----------
   function renderProgress(view) {
@@ -336,7 +386,7 @@
     }
     if (!rows.length) {
       view.append(h('div', { class: 'card empty' },
-        h('div', { class: 'big', 'aria-hidden': 'true', text: '📈' }),
+        h('div', { class: 'big', 'aria-hidden': 'true', text: '—' }),
         h('p', null, h('strong', { text: 'Nothing to show yet' })),
         h('p', { class: 'muted', text: 'Log your first workout and your progress will appear here.' })
       ));
@@ -365,9 +415,16 @@
     return el;
   }
 
+  /** Small hand-drawn style bin icon (same stroke style as the tab bar). */
+  function trashIcon() {
+    const svg = s('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', class: 'ico' });
+    svg.append(s('path', { d: 'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v6M14 11v6' }));
+    return svg;
+  }
+
   /** Simple line chart of one value per session. */
   function lineChart(points, label) {
-    const W = 340, H = 180, PL = 44, PR = 12, PT = 14, PB = 28;
+    const W = 340, H = 200, PL = 68, PR = 12, PT = 20, PB = 32;
     const vals = points.map(function (p) { return p.v; });
     let min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
     if (min === max) { min = min - 1; max = max + 1; }
@@ -396,6 +453,7 @@
   function renderExerciseProgress(view, row) {
     const hist = L.exerciseHistory(data.workouts, row.name);
     document.getElementById('title').textContent = row.name;
+    document.getElementById('page-note').textContent = 'Your best sets and progress for this exercise.';
     view.append(h('button', { type: 'button', class: 'back', onclick: function () { ui.progressKey = null; render(); } }, '‹ All exercises'));
 
     const first = hist[0], last = hist[hist.length - 1];
@@ -420,7 +478,7 @@
       chartCard.append(h('h2', { text: label }));
       if (weighted) {
         const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Chart type' });
-        [['weight', 'Heaviest weight'], ['e1rm', 'Strength (1RM)']].forEach(function (o) {
+        [['weight', 'Heaviest weight'], ['e1rm', 'Estimated max']].forEach(function (o) {
           seg.append(h('button', {
             type: 'button', 'aria-pressed': chartMode === o[0] ? 'true' : 'false', text: o[1],
             onclick: function () { chartMode = o[0]; render(); },
@@ -430,7 +488,7 @@
       }
       chartCard.append(h('div', { class: 'chart-wrap' }, lineChart(hist.map(function (x) { return { date: x.date, v: metric(x) }; }), label)));
       if (weighted && chartMode === 'e1rm') {
-        chartCard.append(h('p', { class: 'muted small', text: 'Combines weight and reps into one number, so more reps at the same weight also counts as progress.' }));
+        chartCard.append(h('p', { class: 'muted small', text: 'Estimated one-repetition maximum: the weight you might lift once, calculated from your logged weight and repetitions. This is an estimate, not a tested maximum.' }));
       }
       view.append(chartCard);
     }
@@ -460,7 +518,7 @@
     const list = L.sortedWorkouts(data.workouts).filter(function (w) { return w.exercises.length; }).reverse();
     if (!list.length) {
       view.append(h('div', { class: 'card empty' },
-        h('div', { class: 'big', 'aria-hidden': 'true', text: '🗓️' }),
+        h('div', { class: 'big', 'aria-hidden': 'true', text: '∅' }),
         h('p', null, h('strong', { text: 'No workouts yet' })),
         h('p', { class: 'muted', text: 'Every workout you log will be listed here.' })
       ));
@@ -490,10 +548,15 @@
     [['kg', 'Kilograms (kg)'], ['lb', 'Pounds (lb)']].forEach(function (o) {
       seg.append(h('button', {
         type: 'button', 'aria-pressed': data.unit === o[0] ? 'true' : 'false', text: o[1],
-        onclick: function () { data.unit = o[0]; save(); render(); },
+        onclick: function () {
+          if (data.unit === o[0]) return;
+          data = L.convertUnit(data, o[0]);
+          if (save()) drafts.clear();
+          render();
+        },
       }));
     });
-    unitCard.append(seg, h('p', { class: 'muted small', text: 'Only changes the label — numbers you already logged are not converted.' }));
+    unitCard.append(seg, h('p', { class: 'muted small', text: 'All saved weights convert automatically. Your history stays consistent.' }));
     view.append(unitCard);
 
     const total = data.workouts.filter(function (w) { return w.exercises.length; }).length;
@@ -501,7 +564,7 @@
       h('h2', { text: 'Backup' }),
       h('p', { class: 'muted small', text: 'Your data is stored only on this phone, in this browser. Save a backup file from time to time (to Files / iCloud Drive) so you never lose it.' }),
       h('button', { type: 'button', class: 'btn primary block', id: 'export-btn', onclick: exportData, disabled: total === 0 }, '⬇︎ Save backup file'),
-      h('label', { class: 'btn ghost block', style: 'display:flex;align-items:center;justify-content:center', for: 'import-file' }, '⬆︎ Restore from backup file'),
+      h('button', { type: 'button', class: 'btn ghost block', onclick: function () { document.getElementById('import-file').click(); } }, '↑ Restore from backup file'),
       h('input', { type: 'file', id: 'import-file', accept: '.json,application/json', style: 'display:none', onchange: importData })
     ));
 
@@ -511,16 +574,17 @@
     ));
 
     view.append(h('section', { class: 'card' },
-      h('h2', { text: 'Danger zone' }),
+      h('h2', { text: 'Delete workouts' }),
       h('button', {
         type: 'button', class: 'btn danger block', disabled: total === 0,
         onclick: function () {
           if (!confirm('Delete ALL ' + total + ' workouts from this phone? This cannot be undone.')) return;
           if (!confirm('Are you really sure? Save a backup first if unsure.')) return;
           data = L.emptyData();
-          save();
+          const saved = save();
+          if (saved) drafts.clear();
           render();
-          toast('All data deleted');
+          if (saved) toast('All data deleted');
         },
       }, 'Delete all data')
     ));
@@ -568,7 +632,7 @@
       const n = incoming.workouts.length;
       if (!confirm('Replace the data on this phone with the backup (' + n + (n === 1 ? ' workout' : ' workouts') + ')?')) return;
       data = incoming;
-      if (save()) toast('Backup restored');
+      if (save()) { drafts.clear(); toast('Backup restored'); }
       render();
     };
     reader.onerror = function () { toast('Could not read the file'); };
@@ -589,7 +653,7 @@
 
   // Data changed in another tab -> reload it.
   window.addEventListener('storage', function (e) {
-    if (e.key === STORAGE_KEY) { data = load(); render(); }
+    if (e.key === STORAGE_KEY || e.key === null) { data = load(); savedJSON = JSON.stringify(data); render(); }
   });
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
+  <meta name="theme-color" content="#f2eee5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#211f1c" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,17 +17,32 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <a class="skip-link" href="#view">Skip to main content</a>
+  <div class="brand-bar">
+    <a class="wordmark" href="./" aria-label="Gym Log home">GYM<span class="brand-star" aria-hidden="true">✳</span>LOG<span class="brand-period">.</span></a>
+    <span class="brand-caption">Your personal<br>workout tracker.</span>
+    <span class="edition">YOUR WORKOUT NOTEBOOK<br><span>Saved on this device. No account needed.</span></span>
+  </div>
   <header class="topbar">
-    <h1 id="title">Today</h1>
+    <div class="inner">
+      <div class="eyebrow" aria-hidden="true"><span id="chapter">Workout log</span><span id="eyebrow-right"></span></div>
+      <div class="page-heading"><h1 id="title">Today</h1></div>
+      <p id="page-note">Add exercises and save each set.</p>
+    </div>
   </header>
 
   <main id="view" tabindex="-1"></main>
 
+  <aside class="margin-note" aria-label="How to log a workout"><span class="overline">How to log</span><ol><li>Add an exercise.</li><li>Enter the weight and repetitions.</li><li>Save each set.</li></ol><span class="note-rule"></span><small>Next workout, your previous sets appear for comparison.</small></aside>
   <nav class="tabbar" aria-label="Main">
-    <button type="button" data-tab="workout"><span aria-hidden="true">🏋️</span>Today</button>
-    <button type="button" data-tab="progress"><span aria-hidden="true">📈</span>Progress</button>
-    <button type="button" data-tab="history"><span aria-hidden="true">🗓️</span>History</button>
-    <button type="button" data-tab="settings"><span aria-hidden="true">⚙️</span>Settings</button>
+    <button type="button" data-tab="workout">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4M6 8v8M18 8v8M21 10v4M6 12h12"/></svg>Today</button>
+    <button type="button" data-tab="progress">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M4 16l5-6 4 3 7-8"/><path d="M16 5h4v4"/></svg>Progress</button>
+    <button type="button" data-tab="history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5zM5 9h14M9 3v4M15 3v4"/></svg>History</button>
+    <button type="button" data-tab="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
   </nav>
 
   <dialog id="add-dialog" aria-labelledby="add-title">

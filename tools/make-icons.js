@@ -25,19 +25,25 @@ function chunk(type, data) {
   return Buffer.concat([len, td, crc]);
 }
 
-/** Dumbbell on a dark blue background. Coordinates are in a 0..1 unit square. */
+/** Ink dumbbell on ruled paper, red marker plates. Coordinates are in a 0..1 unit square. */
 function pixel(x, y) {
-  const bg = [17, 24, 39];
-  const fg = [59, 130, 246];
-  const white = [255, 255, 255];
+  const paper = [242, 238, 229];
+  const rule = [211, 204, 191];
+  const ink = [41, 39, 32];
+  const marker = [146, 45, 39];
   const inRect = function (x0, y0, x1, y1) { return x >= x0 && x <= x1 && y >= y0 && y <= y1; };
   // bar
-  if (inRect(0.26, 0.47, 0.74, 0.53)) return white;
-  // inner plates
-  if (inRect(0.2, 0.3, 0.28, 0.7) || inRect(0.72, 0.3, 0.8, 0.7)) return fg;
-  // outer plates
-  if (inRect(0.13, 0.37, 0.2, 0.63) || inRect(0.8, 0.37, 0.87, 0.63)) return fg;
-  return bg;
+  if (inRect(0.24, 0.47, 0.76, 0.53)) return ink;
+  // inner plates (marker) with an ink outline
+  if (inRect(0.19, 0.29, 0.29, 0.71) || inRect(0.71, 0.29, 0.81, 0.71)) {
+    return (inRect(0.2, 0.3, 0.28, 0.7) || inRect(0.72, 0.3, 0.8, 0.7)) ? marker : ink;
+  }
+  // outer plates (ink)
+  if (inRect(0.12, 0.37, 0.19, 0.63) || inRect(0.81, 0.37, 0.88, 0.63)) return ink;
+  // ruled lines
+  const m = (y * 8) % 1;
+  if (m < 0.06) return rule;
+  return paper;
 }
 
 function png(size) {
