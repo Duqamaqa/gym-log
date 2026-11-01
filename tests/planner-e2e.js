@@ -1,0 +1,147 @@
+'use strict';
+const assert = require('node:assert/strict');
+const path = require('path');
+const fs = require('fs');
+const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
+const URL = process.env.URL || 'http://localhost:8080/';
+const SHOTS = path.join(__dirname, '..', 'screenshots');
+
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('dialog', d => d.accept());
+    await page.goto(URL);
+    const dates = await page.evaluate(() => ({ today: GymLogic.todayISO(), start: GymLogic.weekStart(GymLogic.todayISO()) }));
+    await page.evaluate(start => localStorage.setItem('gymlog.v1', JSON.stringify({ version: 1, unit: 'kg', workouts: [
+      { id: 'legacy', date: start, createdAt: 1, exercises: [{ name: 'Row', sets: [{ w: 40, r: 10 }] }] },
+    ] })), dates.start);
+    await page.reload();
+    await page.getByRole('button', { name: 'Weekly plan', exact: true }).click();
+    await page.getByRole('heading', { name: 'Weekly plan', exact: true }).waitFor();
+    await page.getByText('of 4 workouts completed', { exact: true }).waitFor();
+    await page.getByText('Change weekly goal', { exact: true }).click();
+    await page.locator('#weekly-goal').fill('3');
+    await page.getByRole('button', { name: 'Save goal', exact: true }).click();
+    assert.equal(await page.locator('.plan-card').count(), 3);
+    await page.getByText('Change weekly goal', { exact: true }).click();
+    await page.locator('#weekly-goal').fill('4');
+    await page.getByRole('button', { name: 'Save goal', exact: true }).click();
+    // Failed writes restore the last saved goal and keep the error visible.
+    await page.getByText('Change weekly goal', { exact: true }).click();
+    await page.evaluate(() => { window.savedSetItem = Storage.prototype.setItem; Storage.prototype.setItem = () => { throw new Error('Storage blocked'); }; });
+    await page.locator('#weekly-goal').fill('8');
+    await page.getByRole('button', { name: 'Save goal', exact: true }).click();
+    assert.equal(await page.locator('.plan-card').count(), 4);
+    await page.getByRole('status').filter({ hasText: 'Could not save' }).waitFor();
+    await page.evaluate(() => { Storage.prototype.setItem = window.savedSetItem; });
+    await page.getByRole('button', { name: 'Open Workout 1', exact: true }).click();
+    await page.getByLabel('Workout name', { exact: true }).fill('Upper body');
+    await page.getByLabel('Notes', { exact: true }).fill('Bench first, then rows.');
+    await page.getByRole('button', { name: 'Save workout details', exact: true }).click();
+    await page.getByText('Add planned exercise', { exact: true }).click();
+    await page.locator('main').getByLabel('Exercise name', { exact: true }).fill('Bench press');
+    await page.getByLabel('Sets', { exact: true }).fill('3');
+    await page.getByLabel('Target weight (kg)', { exact: true }).fill('60');
+    await page.getByLabel('Target repetitions', { exact: true }).fill('8');
+    await page.getByRole('button', { name: 'Add to plan', exact: true }).click();
+    assert.match(await page.locator('.planned-exercise').innerText(), /3 sets.*60 kg × 8 reps/);
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('gymlog.v1')).workouts.length), 1, 'planning does not create actual results');
+    await page.getByRole('button', { name: 'Edit planned Bench press', exact: true }).click();
+    await page.getByLabel('Target weight (kg)', { exact: true }).fill('65');
+    await page.getByRole('button', { name: 'Save target', exact: true }).click();
+    assert.match(await page.locator('.planned-exercise').innerText(), /65 kg/);
+    await page.getByRole('button', { name: 'Edit planned Bench press', exact: true }).click();
+    await page.getByLabel('Target weight (kg)', { exact: true }).fill('60');
+    await page.getByRole('button', { name: 'Save target', exact: true }).click();
+    await page.getByRole('button', { name: 'Start logging this workout', exact: true }).click();
+    const bench = page.getByRole('region', { name: 'Bench press', exact: true });
+    assert.equal(await bench.locator('.sets li').count(), 0, 'targets do not count as logged sets');
+    assert.equal(await bench.getByLabel('Weight (kg)').inputValue(), '60');
+    assert.equal(await bench.getByLabel('Repetitions').inputValue(), '8');
+    await bench.getByLabel('Weight (kg)').fill('62.5');
+    await bench.getByRole('button', { name: 'Save set 1', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Mark Upper body complete', exact: true }).check();
+    await page.getByLabel('Completed on', { exact: true }).fill(dates.start);
+    await page.getByLabel('Completed on', { exact: true }).dispatchEvent('change');
+    await page.getByRole('button', { name: 'Weekly plan', exact: true }).click();
+    await page.getByRole('button', { name: '← All weekly workouts', exact: true }).click();
+    assert.equal(await page.locator('.week-count strong').innerText(), '1');
+    assert.match(await page.locator('.activity-list').innerText(), /Upper body/);
+    assert.equal(await page.locator('.week-day').first().locator('.done').count(), 1);
+    await page.getByRole('checkbox', { name: 'Mark Upper body complete', exact: true }).uncheck();
+    assert.equal(await page.locator('.week-count strong').innerText(), '0');
+    assert.match(await page.locator('.activity-list').innerText(), /Sets logged · not checked off/);
+    const actual = await page.evaluate(() => JSON.parse(localStorage.getItem('gymlog.v1')).workouts.find(w => w.label === 'Upper body'));
+    assert.deepEqual(actual.exercises[0].sets, [{ w: 62.5, r: 8 }]);
+    await page.getByRole('checkbox', { name: 'Mark Upper body complete', exact: true }).check();
+
+    // A second workout on the same day stays separate from the first and the legacy log.
+    await page.getByRole('button', { name: 'Open Workout 2', exact: true }).click();
+    await page.getByLabel('Workout name', { exact: true }).fill('Lower body');
+    await page.getByRole('button', { name: 'Save workout details', exact: true }).click();
+    await page.getByText('Add planned exercise', { exact: true }).click();
+    await page.locator('main').getByLabel('Exercise name', { exact: true }).fill('Squat');
+    await page.getByLabel('Target weight (kg)', { exact: true }).fill('100');
+    await page.getByLabel('Target repetitions', { exact: true }).fill('5');
+    await page.getByRole('button', { name: 'Add to plan', exact: true }).click();
+    await page.getByLabel('Workout date', { exact: true }).fill(dates.start);
+    await page.getByRole('button', { name: 'Start logging this workout', exact: true }).click();
+    await page.getByRole('button', { name: 'Save set 1', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Mark Lower body complete', exact: true }).check();
+    assert.equal(await page.locator('.day-workouts button').count(), 3);
+    await page.getByRole('button', { name: 'Weekly plan', exact: true }).click();
+    await page.getByRole('button', { name: '← All weekly workouts', exact: true }).click();
+    assert.equal(await page.locator('.week-count strong').innerText(), '2');
+    await page.screenshot({ path: path.join(SHOTS, '7-weekly-plan.png'), fullPage: true, style: '#toast {visibility:hidden}' });
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'weekly overview fits ' + width + 'px');
+    }
+    await page.screenshot({ path: path.join(SHOTS, '8-weekly-desktop.png'), fullPage: true, style: '#toast {visibility:hidden}' });
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.getByRole('button', { name: 'Open Upper body', exact: true }).click();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'planner detail fits a small phone');
+    await page.screenshot({ path: path.join(SHOTS, '9-workout-plan.png'), fullPage: true, style: '#toast {visibility:hidden}' });
+    await page.getByRole('button', { name: '← All weekly workouts', exact: true }).click();
+
+    // Future plans copy targets, not old completions; logging stays unavailable until that week.
+    await page.getByRole('button', { name: 'Next week', exact: true }).click();
+    await page.getByRole('button', { name: 'Copy previous week’s plan', exact: true }).click();
+    assert.equal(await page.locator('.week-count strong').innerText(), '0');
+    await page.getByRole('button', { name: 'Open Upper body', exact: true }).click();
+    assert.ok(await page.getByRole('button', { name: 'Start logging this workout', exact: true }).isDisabled());
+    assert.ok(await page.getByRole('checkbox', { name: 'Mark Upper body complete', exact: true }).isDisabled());
+    await page.getByRole('button', { name: 'Return to this week', exact: true }).click();
+    assert.equal(await page.locator('.week-count strong').innerText(), '2');
+
+    // Units, backup/restore, migration, reload and offline use retain plans and actual logs.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Pounds (lb)', exact: true }).click();
+    const converted = await page.evaluate(() => JSON.parse(localStorage.getItem('gymlog.v1')));
+    assert.equal(converted.workouts.find(w => w.id === 'legacy').exercises[0].sets[0].r, 10);
+    assert.ok(Math.abs(converted.weeks[0].sessions[0].exercises[0].sets[0].w - 132.277357) < .001);
+    await page.evaluate(() => Object.defineProperty(navigator, 'canShare', { value: () => false, configurable: true }));
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#export-btn').click();
+    const download = await downloadPromise;
+    const backupPath = await download.path();
+    assert.equal(JSON.parse(fs.readFileSync(backupPath)).weeks.length, 2);
+    await page.locator('#import-file').setInputFiles(backupPath);
+    await page.getByRole('status').filter({ hasText: 'Backup restored' }).waitFor();
+    await page.reload();
+    await page.getByRole('button', { name: 'Weekly plan', exact: true }).click();
+    assert.equal(await page.locator('.week-count strong').innerText(), '2');
+    await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+    await page.reload();
+    await context.setOffline(true);
+    await page.reload();
+    await page.getByRole('button', { name: 'Weekly plan', exact: true }).click();
+    assert.equal(await page.locator('.week-count strong').innerText(), '2');
+    assert.deepEqual(errors, []);
+    console.log('Weekly planner E2E passed: migration, targets vs actuals, completion dates, same-day sessions, copying, responsive layout, units, backup/restore and offline use.');
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exit(1); });

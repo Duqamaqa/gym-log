@@ -2,7 +2,7 @@
 
 A free, simple workout log for progressive overload. Built for iPhone, and it works in any browser.
 
-- **Today**: add exercises and log each set (weight × reps). Under every exercise it shows what you did **last time** and a **"Beat it"** target.
+- **Today**: add exercises and log each set (weight × reps). Under every exercise it shows what you did **last time** and a **suggested next set**.
 - **Progress**: for each exercise you see your best set, estimated 1-rep max, and how it changed over time.
 - **History**: every past workout, by date.
 - **Settings**: kg/lb with automatic conversion of saved weights, save or restore a backup file, delete data.
@@ -67,3 +67,25 @@ The interface uses plain instructions and readable control labels. Workout value
 include units and repetitions, set actions are labeled Save/Delete, and controls
 remain at least 44px tall. Functional UI text is at least 14px; smaller lettering
 is confined to decorative artwork. On phones, the save action has a full-width row.
+
+## Flexible weekly plans
+
+Use the **Log workout / Weekly plan** switch above the main view. Weeks run
+Monday–Sunday. Choose a weekly goal (four workouts by default), name each workout,
+and add planned exercises with optional set/weight/repetition targets. Workouts
+have no assigned weekday or order. You can copy the previous week's plan.
+
+Open a workout and choose **Start logging this workout** to record actual sets.
+Targets prefill the form but never count as performed sets. Tick **Mark as
+completed** after training; change the completion date if you trained earlier in
+that week. Unchecking a workout keeps its logged sets. Multiple workouts on the
+same date remain separate in History and the daily workout selector.
+
+The weekly activity strip and dated activity list show completed workouts and
+logged sets. Plans are stored on this device alongside the existing workout log
+and included in backups. Version 1 backups migrate to version 2 without removing
+existing workouts. New backups include weekly plans; older app versions cannot
+read the new backup format.
+
+Browser checks for the planner use the same local server and Playwright setup:
+`PLAYWRIGHT=/path/to/node_modules/playwright node tests/planner-e2e.js`.

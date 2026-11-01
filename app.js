@@ -101,6 +101,10 @@
   const ui = {
     tab: 'workout',
     date: L.todayISO(),
+    week: L.weekStart(L.todayISO()),
+    planSessionId: null,
+    workoutId: null,
+    planExerciseKey: null,
     progressKey: null, // exercise key when viewing one exercise's progress
   };
 
@@ -116,11 +120,14 @@
   document.querySelectorAll('.tabbar button').forEach(function (b) {
     b.addEventListener('click', function () {
       const tab = b.getAttribute('data-tab');
-      if (tab === 'workout') ui.date = L.todayISO();
+      if (tab === 'workout') { ui.date = L.todayISO(); ui.workoutId = null; }
       if (tab === 'progress') ui.progressKey = null;
       go(tab);
     });
   });
+
+  document.getElementById('log-mode').addEventListener('click', function () { go('workout'); });
+  document.getElementById('plan-mode').addEventListener('click', function () { go('plan'); });
 
   function render() {
     const view = document.getElementById('view');
@@ -128,17 +135,22 @@
     const eyebrow = document.getElementById('eyebrow-right');
     view.replaceChildren();
     document.body.dataset.view = ui.tab;
+    document.getElementById('log-mode').setAttribute('aria-pressed', ui.tab === 'plan' ? 'false' : 'true');
+    document.getElementById('plan-mode').setAttribute('aria-pressed', ui.tab === 'plan' ? 'true' : 'false');
     const n = data.workouts.filter(function (w) { return w.exercises.some(function (e) { return e.sets.length; }); }).length;
     eyebrow.textContent = ui.tab === 'workout'
       ? fmtDate(ui.date, { day: 'numeric', month: 'short', year: 'numeric' })
       : n + (n === 1 ? ' workout' : ' workouts');
     document.querySelectorAll('.tabbar button').forEach(function (b) {
-      if (b.getAttribute('data-tab') === ui.tab) b.setAttribute('aria-current', 'page');
+      if (b.getAttribute('data-tab') === (ui.tab === 'plan' ? 'workout' : ui.tab)) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
-    document.getElementById('chapter').textContent = { workout: 'Workout log', progress: 'Exercise progress', history: 'Past workouts', settings: 'Preferences & backup' }[ui.tab];
-    document.getElementById('page-note').textContent = { workout: 'Add exercises and save each set.', progress: 'Choose an exercise to compare your weights and repetitions over time.', history: 'Open a past workout to review or edit your sets.', settings: 'Change weight units, back up your workouts, or restore a saved file.' }[ui.tab];
-    if (ui.tab === 'workout') {
+    document.getElementById('chapter').textContent = { plan: 'Flexible training', workout: 'Workout log', progress: 'Exercise progress', history: 'Past workouts', settings: 'Preferences & backup' }[ui.tab];
+    document.getElementById('page-note').textContent = { plan: 'Set a weekly goal. Train on any day, in any order.', workout: 'Add exercises and save each set.', progress: 'Choose an exercise to compare your weights and repetitions over time.', history: 'Open a past workout to review or edit your sets.', settings: 'Change weight units, back up your workouts, or restore a saved file.' }[ui.tab];
+    if (ui.tab === 'plan') {
+      title.textContent = 'Weekly plan';
+      renderPlan(view);
+    } else if (ui.tab === 'workout') {
       title.textContent = ui.date === L.todayISO() ? 'Today' : 'Workout';
       renderWorkout(view);
     } else if (ui.tab === 'progress') {
@@ -155,7 +167,8 @@
 
   // ---------- data helpers ----------
   function workoutFor(date, create) {
-    let w = data.workouts.find(function (x) { return x.date === date; });
+    let w = data.workouts.find(function (x) { return x.id === ui.workoutId && x.date === date; }) ||
+      data.workouts.find(function (x) { return x.date === date; });
     if (!w && create) {
       w = { id: L.newId(), date: date, createdAt: Date.now(), exercises: [] };
       data.workouts.push(w);
@@ -164,7 +177,7 @@
   }
 
   function dropEmptyWorkout(w) {
-    if (w && w.exercises.length === 0) {
+    if (w && w.exercises.length === 0 && !L.plannedSession(data, w.id)) {
       data.workouts = data.workouts.filter(function (x) { return x !== w; });
     }
   }
@@ -194,11 +207,28 @@
     const dateInput = h('input', {
       type: 'date', id: 'workout-date', value: ui.date, max: L.todayISO(),
       onchange: function (e) {
-        if (L.isISODate(e.target.value) && e.target.value <= L.todayISO()) { ui.date = e.target.value; render(); }
+        if (L.isISODate(e.target.value) && e.target.value <= L.todayISO()) { ui.date = e.target.value; ui.workoutId = null; render(); }
         else e.target.value = ui.date;
       },
     });
     view.append(h('div', { class: 'date-row' }, h('label', { for: 'workout-date', text: 'Date' }), dateInput));
+
+    const dayWorkouts = data.workouts.filter(function (x) { return x.date === ui.date; });
+    if (dayWorkouts.length > 1) {
+      view.append(h('div', { class: 'day-workouts', role: 'group', 'aria-label': 'Workouts on this date' },
+        dayWorkouts.map(function (x, i) { return h('button', { type: 'button', class: 'btn ghost',
+          'aria-pressed': w && w.id === x.id ? 'true' : 'false',
+          onclick: function () { ui.workoutId = x.id; render(); } }, x.label || 'Workout ' + (i + 1)); })
+      ));
+    }
+    const link = w && L.plannedSession(data, w.id);
+    if (link) {
+      view.append(h('section', { class: 'linked-plan', 'aria-label': 'Linked weekly workout' },
+        h('strong', { text: link.session.name }),
+        completionControl(link.week, link.session),
+        h('button', { type: 'button', class: 'back', onclick: function () { ui.week = link.week.start; ui.planSessionId = link.session.id; go('plan'); } }, 'Back to weekly plan')
+      ));
+    }
 
     const exercises = w ? w.exercises : [];
     const sets = exercises.reduce(function (n, e) { return n + e.sets.length; }, 0);
@@ -291,7 +321,11 @@
 
     // Prefill with the matching set from last time, else the previous set today.
     const n = ex.sets.length;
-    const guess = (prev && prev.sets[n]) || ex.sets[n - 1] || (prev && prev.sets[prev.sets.length - 1]) || null;
+    const linked = L.plannedSession(data, w.id);
+    const planned = linked && linked.session.exercises.find(function (e) { return L.keyOf(e.name) === key; });
+    const target = planned && (planned.sets[n] || planned.sets[planned.sets.length - 1]);
+    const guess = linked ? ex.sets[n - 1] || target || (prev && prev.sets[n]) || null
+      : (prev && prev.sets[n]) || ex.sets[n - 1] || (prev && prev.sets[prev.sets.length - 1]) || null;
     const idBase = 'f-' + w.id + '-' + index;
     const draftKey = w.id + ':' + key + ':' + unit();
     const draft = drafts.get(draftKey);
@@ -375,6 +409,268 @@
     const box = dlg.getBoundingClientRect();
     if (e.target === dlg && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom)) dlg.close();
   });
+
+  // ---------- FLEXIBLE WEEKLY PLAN ----------
+  function currentWeek() {
+    return data.weeks.find(function (w) { return w.start === ui.week; }) || L.newWeek(ui.week);
+  }
+
+  function commitWeek(week) {
+    const index = data.weeks.findIndex(function (w) { return w.start === week.start; });
+    if (index < 0) data.weeks.push(week);
+    else data.weeks[index] = week;
+    return save();
+  }
+
+  function completionDate(week, session) {
+    const workout = data.workouts.find(function (w) { return w.id === session.workoutId; });
+    return session.completedOn || (workout && workout.date) ||
+      (L.todayISO() < week.start ? week.start : L.todayISO() > L.shiftDate(week.start, 6) ? L.shiftDate(week.start, 6) : L.todayISO());
+  }
+
+  function completionControl(week, session) {
+    const box = h('input', {
+      type: 'checkbox', checked: !!session.completedOn,
+      disabled: week.start > L.todayISO(), 'aria-label': 'Mark ' + session.name + ' complete',
+      onchange: function () {
+        try {
+          L.completePlannedWorkout(data, week, session, box.checked, completionDate(week, session));
+          if (commitWeek(week)) toast(box.checked ? 'Workout completed' : 'Completion unchecked. Your logged sets are kept.');
+        } catch (err) { toast(err.message); }
+        render();
+      },
+    });
+    const wrap = h('div', { class: 'completion-control' },
+      h('label', { class: 'completion-label' }, box, h('span', { text: session.completedOn ? 'Completed' : 'Mark as completed' }))
+    );
+    if (session.completedOn) {
+      const id = 'completed-' + session.id;
+      wrap.append(h('label', { class: 'completion-date', for: id }, 'Completed on',
+        h('input', { id: id, type: 'date', value: session.completedOn, min: week.start,
+          max: L.shiftDate(week.start, 6) < L.todayISO() ? L.shiftDate(week.start, 6) : L.todayISO(),
+          onchange: function (e) {
+            try { L.completePlannedWorkout(data, week, session, true, e.target.value);
+              if (ui.workoutId === session.workoutId) ui.date = e.target.value;
+              commitWeek(week); }
+            catch (err) { toast(err.message); }
+            render();
+          },
+        })
+      ));
+    }
+    return wrap;
+  }
+
+  function renderPlan(view) {
+    const week = currentWeek();
+    const end = L.shiftDate(week.start, 6);
+    document.getElementById('eyebrow-right').textContent = fmtDate(week.start, { day: 'numeric', month: 'short' }) + ' – ' + fmtDate(end, { day: 'numeric', month: 'short' });
+    const nav = h('div', { class: 'week-nav', 'aria-label': 'Choose week' },
+      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Previous week', onclick: function () { changeWeek(-7); } }, '← Previous'),
+      h('span', { text: fmtDate(week.start, { day: 'numeric', month: 'short' }) + ' – ' + fmtDate(end, { day: 'numeric', month: 'short', year: 'numeric' }) }),
+      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Next week', onclick: function () { changeWeek(7); } }, 'Next →')
+    );
+    view.append(nav);
+    if (week.start !== L.weekStart(L.todayISO())) view.append(h('button', { type: 'button', class: 'back', onclick: function () { ui.week = L.weekStart(L.todayISO()); ui.planSessionId = null; render(); } }, 'Return to this week'));
+    if (ui.planSessionId) {
+      const session = week.sessions.find(function (s) { return s.id === ui.planSessionId; });
+      if (session) { renderPlanSession(view, week, session); return; }
+      ui.planSessionId = null;
+    }
+    const completed = week.sessions.filter(function (s) { return !!s.completedOn; }).length;
+    const summary = h('section', { class: 'week-summary', 'aria-label': 'Weekly goal' },
+      h('div', { class: 'week-count' }, h('strong', { text: String(completed) }), h('span', { text: 'of ' + week.goal + ' workouts completed' })),
+      h('progress', { max: week.goal, value: Math.min(completed, week.goal), 'aria-label': completed + ' of ' + week.goal + ' workouts completed' }),
+      h('p', { class: 'muted', text: 'Monday–Sunday. Any day, any order.' })
+    );
+    const goalInput = h('input', { type: 'number', id: 'weekly-goal', min: 1, max: 52, value: week.goal, inputmode: 'numeric', required: true });
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    const goalSettings = h('details', { class: 'goal-settings' }, h('summary', { text: 'Change weekly goal' }));
+    goalSettings.append(h('form', { class: 'goal-form', onsubmit: function (e) {
+      e.preventDefault();
+      const goal = Number(goalInput.value);
+      if (!Number.isInteger(goal) || goal < 1 || goal > 52) { error.textContent = 'Choose 1–52 workouts per week.'; return; }
+      week.goal = goal;
+      while (week.sessions.length < goal) week.sessions.push(L.newSession(week.sessions.length));
+      // Keep customized or logged workouts when lowering the goal.
+      while (week.sessions.length > goal) {
+        const last = week.sessions[week.sessions.length - 1];
+        if (last.completedOn || last.workoutId || last.exercises.length || last.notes || last.name !== 'Workout ' + week.sessions.length) break;
+        week.sessions.pop();
+      }
+      if (commitWeek(week)) toast('Weekly goal saved');
+      render();
+    } }, h('label', { for: 'weekly-goal', text: 'Workouts this week' }), goalInput,
+      h('button', { type: 'submit', class: 'btn ghost', text: 'Save goal' })), error);
+    summary.append(goalSettings);
+    view.append(summary);
+    renderWeekTimeline(view, week);
+    const previous = data.weeks.find(function (w) { return w.start === L.shiftDate(week.start, -7); });
+    const untouched = week.sessions.every(function (s, i) { return !s.workoutId && !s.completedOn && !s.exercises.length && !s.notes && s.name === 'Workout ' + (i + 1); });
+    if (previous && untouched) view.append(h('button', { type: 'button', class: 'btn ghost block', onclick: function () {
+      const copy = L.copyWeek(previous, week.start);
+      if (commitWeek(copy)) toast('Copied exercises and targets. Completion starts fresh.');
+      render();
+    } }, 'Copy previous week’s plan'));
+    view.append(h('div', { class: 'plan-section-heading' }, h('h2', { text: 'Your workouts' }), h('p', { class: 'muted', text: 'Open a workout to plan exercises or record your sets.' })));
+    week.sessions.forEach(function (session, i) {
+      const card = h('section', { class: 'plan-card' + (session.completedOn ? ' is-complete' : ''), 'aria-label': session.name });
+      card.append(h('div', { class: 'exercise-index', text: 'Workout ' + (i + 1) }),
+        h('h2', { text: session.name }), completionControl(week, session));
+      if (session.exercises.length) card.append(h('p', { class: 'planned-names', text: session.exercises.map(function (e) { return e.name; }).join(' · ') }));
+      else card.append(h('p', { class: 'muted', text: 'No exercises planned yet.' }));
+      card.append(h('button', { type: 'button', class: 'btn ghost block', onclick: function () { ui.planSessionId = session.id; ui.planExerciseKey = null; render(); window.scrollTo(0, 0); } }, 'Open ' + session.name));
+      view.append(card);
+    });
+    view.append(h('button', { type: 'button', class: 'btn ghost block', disabled: week.sessions.length >= 100, onclick: function () {
+      week.sessions.push(L.newSession(week.sessions.length));
+      commitWeek(week); render();
+    } }, 'Add another workout'));
+  }
+
+  function changeWeek(days) {
+    ui.week = L.shiftDate(ui.week, days); ui.planSessionId = null; ui.planExerciseKey = null; render();
+  }
+
+  function renderWeekTimeline(view, week) {
+    const events = L.weekEvents(data, week);
+    const timeline = h('section', { class: 'week-timeline', 'aria-label': 'When you trained' }, h('h2', { text: 'When you trained' }));
+    const days = h('div', { class: 'week-days' });
+    for (let i = 0; i < 7; i++) {
+      const date = L.shiftDate(week.start, i), items = events.filter(function (e) { return e.date === date; });
+      const done = items.some(function (e) { return e.completed; });
+      days.append(h('div', { class: 'week-day' + (date === L.todayISO() ? ' is-today' : '') + (items.length ? ' has-activity' : ''),
+        'aria-label': fmtDate(date) + ': ' + (items.length ? items.map(function (e) { return e.name + (e.completed ? ', completed' : ', sets logged'); }).join('; ') : 'No activity') },
+        h('span', { class: 'day-name', text: fmtDate(date, { weekday: 'short' }) }),
+        h('span', { class: 'day-number', text: String(Number(date.slice(-2))) }),
+        h('span', { class: 'day-dot' + (done ? ' done' : ''), 'aria-hidden': 'true', text: done ? '✓' : items.length ? '•' : '–' })
+      ));
+    }
+    timeline.append(days);
+    if (!events.length) timeline.append(h('p', { class: 'muted', text: 'Your completed workouts and logged sets will appear here.' }));
+    else {
+      const list = h('ul', { class: 'activity-list' });
+      events.forEach(function (event) {
+        const w = data.workouts.find(function (w) { return w.id === event.workoutId; });
+        list.append(h('li', null,
+          h('span', { class: 'activity-date', text: fmtDate(event.date, { weekday: 'short', day: 'numeric', month: 'short' }) }),
+          h('span', null, h('strong', { text: event.name }), h('span', { class: 'activity-status' + (event.completed ? ' completed' : ''), text: event.completed ? '✓ Completed' : 'Sets logged · not checked off' })),
+          w ? h('button', { type: 'button', class: 'back', 'aria-label': 'View sets for ' + event.name, onclick: function () { ui.date = w.date; ui.workoutId = w.id; go('workout'); } }, 'View sets') : null
+        ));
+      });
+      timeline.append(list);
+    }
+    view.append(timeline);
+  }
+
+  function renderPlanSession(view, week, session) {
+    view.append(h('button', { type: 'button', class: 'back', onclick: function () { ui.planSessionId = null; ui.planExerciseKey = null; render(); } }, '← All weekly workouts'));
+    const header = h('section', { class: 'plan-detail', 'aria-label': 'Plan ' + session.name }, h('h2', { text: session.name }), completionControl(week, session));
+    const draftKey = 'plan-name:' + session.id;
+    const draft = drafts.get(draftKey);
+    const name = h('input', { id: 'session-name', type: 'text', value: draft ? draft.name : session.name, maxlength: 60, required: true });
+    const notes = h('textarea', { id: 'session-notes', rows: 3, maxlength: 2000, placeholder: 'Optional notes, exercise order, or reminders' });
+    notes.value = draft ? draft.notes : session.notes;
+    function keep() { drafts.set(draftKey, { name: name.value, notes: notes.value }); }
+    name.addEventListener('input', keep); notes.addEventListener('input', keep);
+    const nameSettings = h('details', { class: 'name-settings', open: /^Workout \d+$/.test(session.name) && !session.exercises.length }, h('summary', { text: 'Edit workout name & notes' }));
+    nameSettings.append(h('form', { class: 'plan-name-form', onsubmit: function (e) {
+      e.preventDefault();
+      const clean = L.cleanName(name.value);
+      if (!clean) return;
+      session.name = clean; session.notes = notes.value;
+      const w = data.workouts.find(function (w) { return w.id === session.workoutId; });
+      if (w) w.label = clean;
+      if (commitWeek(week)) { drafts.delete(draftKey); toast('Workout details saved'); }
+      render();
+    } }, h('label', { for: name.id, text: 'Workout name' }), name,
+      h('label', { for: notes.id, text: 'Notes' }), notes,
+      h('button', { type: 'submit', class: 'btn ghost', text: 'Save workout details' })));
+    header.append(nameSettings);
+    view.append(header);
+    const targets = h('section', { class: 'plan-targets', 'aria-label': 'Planned exercises' },
+      h('h2', { text: 'Planned exercises' }),
+      h('p', { class: 'muted', text: 'These are targets. Use the workout log to record actual sets.' })
+    );
+    session.exercises.forEach(function (exercise) {
+      targets.append(h('div', { class: 'planned-exercise' },
+        h('div', null, h('strong', { text: exercise.name }), h('p', { text: exercise.sets.length ? exercise.sets.length + ' sets · ' + exercise.sets.map(fmtSet).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(' / ') : 'No weight or repetition target yet' })),
+        h('div', { class: 'plan-row-actions' },
+          h('button', { type: 'button', class: 'back', 'aria-label': 'Edit planned ' + exercise.name, onclick: function () { ui.planExerciseKey = L.keyOf(exercise.name); render(); document.getElementById('planned-name').focus(); } }, 'Edit'),
+          h('button', { type: 'button', class: 'back', 'aria-label': 'Remove planned ' + exercise.name, onclick: function () {
+            if (!confirm('Remove ' + exercise.name + ' from this plan? Any logged sets will be kept.')) return;
+            session.exercises = session.exercises.filter(function (e) { return e !== exercise; });
+            ui.planExerciseKey = null; commitWeek(week); render();
+          } }, 'Remove')
+        )
+      ));
+    });
+    const exerciseEditor = h('details', { class: 'plan-form-disclosure', open: !!ui.planExerciseKey }, h('summary', { text: ui.planExerciseKey ? 'Edit exercise target' : 'Add planned exercise' }));
+    exerciseEditor.append(plannedExerciseForm(week, session));
+    targets.append(exerciseEditor);
+    view.append(targets);
+    const actual = data.workouts.find(function (w) { return w.id === session.workoutId; });
+    const dateDraftKey = 'plan-date:' + session.id;
+    const date = h('input', { type: 'date', id: 'planned-log-date', value: drafts.get(dateDraftKey) || (actual ? actual.date : completionDate(week, session)),
+      min: week.start, max: L.shiftDate(week.start, 6) < L.todayISO() ? L.shiftDate(week.start, 6) : L.todayISO(),
+      onchange: function () { drafts.set(dateDraftKey, date.value); } });
+    const record = h('section', { class: 'plan-record', 'aria-label': 'Actual workout' }, h('h2', { text: 'Record what you did' }),
+      h('p', { class: 'muted', text: actual ? 'Your saved sets are in the workout log. Open it to continue.' : 'Choose the date you trained. Enter your actual weight and repetitions in the workout log.' }),
+      h('label', { for: date.id, text: 'Workout date' }), date,
+      h('button', { type: 'button', class: 'btn primary block', disabled: week.start > L.todayISO(), onclick: function () {
+        try {
+          const workout = L.startPlannedWorkout(data, week, session, date.value);
+          // New planned exercises are added without copying targets into actual results.
+          session.exercises.forEach(function (e) { if (!L.findExercise(workout, e.name)) workout.exercises.push({ name: e.name, sets: [] }); });
+          if (!commitWeek(week)) { render(); return; }
+          ui.date = workout.date; ui.workoutId = workout.id; go('workout');
+        } catch (err) { toast(err.message); }
+      } }, actual ? 'Open workout log' : 'Start logging this workout')
+    );
+    if (week.start > L.todayISO()) record.append(h('p', { class: 'muted', text: 'You can plan ahead. Logging and completion become available when this week begins.' }));
+    view.insertBefore(record, targets);
+  }
+
+  function plannedExerciseForm(week, session) {
+    const existing = session.exercises.find(function (e) { return L.keyOf(e.name) === ui.planExerciseKey; });
+    const key = 'plan-exercise:' + session.id + ':' + (ui.planExerciseKey || 'new') + ':' + unit();
+    const draft = drafts.get(key) || {};
+    const first = existing && existing.sets[0];
+    const name = h('input', { id: 'planned-name', type: 'text', maxlength: 60, value: draft.name != null ? draft.name : existing ? existing.name : '', placeholder: 'e.g. Bench press', required: true });
+    const count = h('input', { id: 'planned-count', type: 'number', min: 1, max: 20, value: draft.count != null ? draft.count : existing && existing.sets.length || 3, required: true });
+    const weight = h('input', { id: 'planned-weight', type: 'text', inputmode: 'decimal', placeholder: '0', value: draft.weight != null ? draft.weight : first ? L.fmtNum(first.w) : '' });
+    const reps = h('input', { id: 'planned-reps', type: 'text', inputmode: 'numeric', placeholder: 'Optional', value: draft.reps != null ? draft.reps : first ? first.r : '' });
+    function keep() { drafts.set(key, { name: name.value, count: count.value, weight: weight.value, reps: reps.value }); }
+    [name, count, weight, reps].forEach(function (input) { input.addEventListener('input', keep); });
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    const form = h('form', { class: 'planned-form', onsubmit: function (e) {
+      e.preventDefault();
+      const clean = L.cleanName(name.value), n = Number(count.value);
+      if (!clean) { error.textContent = 'Enter an exercise name.'; return; }
+      if (!Number.isInteger(n) || n < 1 || n > 20) { error.textContent = 'Choose 1–20 sets.'; return; }
+      if (session.exercises.some(function (ex) { return ex !== existing && L.keyOf(ex.name) === L.keyOf(clean); })) { error.textContent = 'This exercise is already in the plan. Use Edit to change its target.'; return; }
+      let sets = [];
+      if (reps.value.trim() || weight.value.trim()) {
+        const result = L.validateSetInput(weight.value, reps.value, unit());
+        if (!result.ok) { error.textContent = result.error; return; }
+        sets = Array.from({ length: n }, function () { return { w: result.set.w, r: result.set.r }; });
+      }
+      if (existing) { existing.name = clean; existing.sets = sets; }
+      else session.exercises.push({ name: clean, sets: sets });
+      if (commitWeek(week)) { drafts.delete(key); ui.planExerciseKey = null; toast('Planned exercise saved'); }
+      render();
+    } },
+      h('h3', { text: existing ? 'Edit exercise target' : 'Add a planned exercise' }),
+      h('div', { class: 'plan-exercise-name' }, h('label', { for: name.id, text: 'Exercise name' }), name),
+      h('div', null, h('label', { for: count.id, text: 'Sets' }), count),
+      h('div', null, h('label', { for: weight.id, text: 'Target weight (' + unit() + ')' }), weight),
+      h('div', null, h('label', { for: reps.id, text: 'Target repetitions' }), reps),
+      h('p', { class: 'muted plan-form-help', text: 'Weight and repetitions are optional. Use 0 weight for bodyweight exercises.' }),
+      h('button', { type: 'submit', class: 'btn primary', text: existing ? 'Save target' : 'Add to plan' }), error
+    );
+    if (existing) form.append(h('button', { type: 'button', class: 'btn ghost', onclick: function () { ui.planExerciseKey = null; render(); } }, 'Cancel edit'));
+    return form;
+  }
 
   // ---------- PROGRESS ----------
   function renderProgress(view) {
@@ -528,10 +824,10 @@
     list.forEach(function (w) {
       view.append(h('button', {
         type: 'button', class: 'card list-btn',
-        onclick: function () { ui.date = w.date; go('workout'); },
+        onclick: function () { ui.date = w.date; ui.workoutId = w.id; go('workout'); },
       },
         h('span', null,
-          h('span', { class: 'title', text: relDate(w.date) }),
+          h('span', { class: 'title', text: (w.label ? w.label + ' · ' : '') + relDate(w.date) }),
           w.exercises.map(function (e) {
             return h('span', { class: 'muted small', style: 'display:block', text: e.name + ': ' + (e.sets.length ? e.sets.map(fmtSetShort).join(', ') : 'no sets') });
           })
@@ -563,7 +859,7 @@
     view.append(h('section', { class: 'card' },
       h('h2', { text: 'Backup' }),
       h('p', { class: 'muted small', text: 'Your data is stored only on this phone, in this browser. Save a backup file from time to time (to Files / iCloud Drive) so you never lose it.' }),
-      h('button', { type: 'button', class: 'btn primary block', id: 'export-btn', onclick: exportData, disabled: total === 0 }, '⬇︎ Save backup file'),
+      h('button', { type: 'button', class: 'btn primary block', id: 'export-btn', onclick: exportData, disabled: total === 0 && data.weeks.length === 0 }, '⬇︎ Save backup file'),
       h('button', { type: 'button', class: 'btn ghost block', onclick: function () { document.getElementById('import-file').click(); } }, '↑ Restore from backup file'),
       h('input', { type: 'file', id: 'import-file', accept: '.json,application/json', style: 'display:none', onchange: importData })
     ));
@@ -576,9 +872,9 @@
     view.append(h('section', { class: 'card' },
       h('h2', { text: 'Delete workouts' }),
       h('button', {
-        type: 'button', class: 'btn danger block', disabled: total === 0,
+        type: 'button', class: 'btn danger block', disabled: total === 0 && data.weeks.length === 0,
         onclick: function () {
-          if (!confirm('Delete ALL ' + total + ' workouts from this phone? This cannot be undone.')) return;
+          if (!confirm('Delete all workouts and weekly plans from this device? This cannot be undone.')) return;
           if (!confirm('Are you really sure? Save a backup first if unsure.')) return;
           data = L.emptyData();
           const saved = save();
@@ -630,7 +926,7 @@
         return;
       }
       const n = incoming.workouts.length;
-      if (!confirm('Replace the data on this phone with the backup (' + n + (n === 1 ? ' workout' : ' workouts') + ')?')) return;
+      if (!confirm('Replace workouts and weekly plans on this device with the backup (' + n + ' workouts, ' + incoming.weeks.length + ' weekly plans)?')) return;
       data = incoming;
       if (save()) { drafts.clear(); toast('Backup restored'); }
       render();

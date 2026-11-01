@@ -156,7 +156,7 @@ test('targets stay inside the supported input limits', function () {
 });
 
 test('future backup formats are rejected instead of silently losing unknown fields', function () {
-  assert.throws(function () { L.normalizeData({ version: 2, workouts: [] }); }, /Unsupported backup version/);
+  assert.throws(function () { L.normalizeData({ version: 3, workouts: [] }); }, /Unsupported backup version/);
 });
 
 

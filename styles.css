@@ -252,3 +252,111 @@ dialog h2 { font: 35px var(--serif); margin: 0 0 24px; letter-spacing: -.04em; }
   .brand-caption { display: none; }
   .topbar, main { padding-left: 18px; padding-right: 18px; }
 }
+
+/* Flexible weekly planning: undated workout cards, dated activity. */
+.mode-switch { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--marker); margin: 0 0 22px; }
+.mode-switch button { min-height: 52px; padding: 12px 8px; border: 0; background: transparent; color: var(--marker); font: 600 16px/1.4 var(--sans); }
+.mode-switch button + button { border-left: 1px solid var(--marker); }
+.mode-switch button[aria-pressed="true"] { background: var(--marker); color: var(--marker-ink); }
+.week-nav { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; border-top: 1px solid var(--ink); padding: 18px 0; }
+.week-nav > span { text-align: center; font-size: 16px; }
+.week-nav .btn { padding: 10px; font-size: 14px; }
+.week-summary { padding: 24px; background: var(--same-bg); border-left: 3px solid var(--marker); margin: 12px 0 28px; }
+.week-count { display: flex; gap: 16px; align-items: center; }
+.week-count strong { font: 64px/1 var(--serif); color: var(--marker); }
+.week-count span { font-size: 19px; max-width: 190px; }
+.week-summary progress { display: block; width: 100%; height: 10px; margin: 22px 0 16px; appearance: none; border: 0; background: var(--rule); accent-color: var(--marker); }
+.week-summary progress::-webkit-progress-bar { background: var(--rule); }
+.week-summary progress::-webkit-progress-value { background: var(--marker); }
+.week-summary progress::-moz-progress-bar { background: var(--marker); }
+.week-summary p { margin: 8px 0 20px; font-size: 16px; }
+.goal-form { display: grid; grid-template-columns: 1fr 72px auto; align-items: center; gap: 10px; }
+.goal-form label { font-size: 16px; }
+.goal-form input, .plan-name-form input, .plan-name-form textarea, .planned-form input, .plan-record input, .completion-date input { width: 100%; min-width: 0; min-height: 48px; border: 1px solid var(--rule); border-bottom-color: var(--ink); background: var(--paper-2); color: var(--ink); border-radius: 0; padding: 10px; font: 16px/1.5 var(--sans); }
+.goal-form input { text-align: center; }
+.week-timeline { margin: 28px 0 36px; }
+.week-timeline h2, .plan-section-heading h2, .plan-detail h2, .plan-targets h2, .plan-record h2, .plan-card h2 { font: 400 29px/1.2 var(--serif); letter-spacing: -.02em; margin: 0 0 18px; overflow-wrap: anywhere; }
+.week-days { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 6px; margin: 22px 0 16px; }
+.week-day { display: flex; flex-direction: column; align-items: center; gap: 8px; border-bottom: 1px solid var(--rule); padding: 8px 0 12px; }
+.week-day.is-today { border-bottom: 3px solid var(--marker); }
+.day-name { color: var(--ink-2); font-size: 14px; }
+.day-number { font: 22px var(--serif); }
+.day-dot { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--rule); border-radius: 50%; color: var(--ink-2); font-size: 18px; }
+.has-activity .day-dot { background: var(--marker); color: var(--marker-ink); border-color: var(--marker); }
+.has-activity .day-dot.done { background: var(--up); color: var(--paper); border-color: var(--up); }
+.activity-list { list-style: none; margin: 20px 0 0; padding: 0; }
+.activity-list li { display: grid; grid-template-columns: 110px minmax(0,1fr) auto; align-items: center; gap: 12px; border-top: 1px solid var(--rule); padding: 16px 0; }
+.activity-date { color: var(--ink-2); font-size: 14px; }
+.activity-status { display: block; font-size: 14px; color: var(--up); margin-top: 4px; }
+.activity-list strong { overflow-wrap: anywhere; }
+.plan-section-heading { border-top: 1px solid var(--ink); padding-top: 24px; }
+.plan-section-heading h2 { margin-bottom: 8px; }
+.plan-section-heading p { margin: 0 0 24px; }
+.plan-card { border: 1px solid var(--rule); padding: 22px; margin: 18px 0; background: var(--paper-2); }
+.plan-card.is-complete { border-left: 4px solid var(--up); }
+.plan-card h2 { margin: 6px 0 10px; }
+.completion-label { display: flex; align-items: center; gap: 12px; cursor: pointer; font-weight: 600; min-height: 48px; }
+.completion-label input { appearance: auto; width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--up); cursor: pointer; }
+.completion-label:has(input:disabled) { opacity: .55; cursor: default; }
+.completion-date { display: flex; align-items: center; gap: 12px; margin: 10px 0 14px; font-size: 14px; }
+.completion-date input { width: auto; max-width: 100%; }
+.planned-names { font-size: 16px; overflow-wrap: anywhere; }
+.linked-plan { background: var(--same-bg); padding: 16px 20px; border-left: 3px solid var(--marker); margin: 12px 0 20px; }
+.linked-plan > strong { font: 26px var(--serif); }
+.linked-plan .back { font: 16px var(--sans); text-decoration: underline; }
+.day-workouts { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.day-workouts [aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.plan-detail, .plan-targets, .plan-record { margin: 18px 0 32px; padding-top: 24px; border-top: 1px solid var(--rule); }
+.plan-name-form { display: grid; gap: 8px; margin-top: 24px; }
+.plan-name-form label, .plan-record > label, .planned-form label { font-weight: 600; display: block; font-size: 14px; margin: 8px 0 6px; }
+.plan-name-form textarea { resize: vertical; }
+.plan-name-form button { justify-self: start; margin-top: 8px; }
+.planned-exercise { display: flex; justify-content: space-between; align-items: start; gap: 12px; border-top: 1px solid var(--rule); padding: 18px 0; }
+.planned-exercise > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.planned-exercise p { margin: 8px 0 0; font-size: 16px; }
+.plan-row-actions { display: flex; gap: 12px; }
+.plan-row-actions .back { font: 14px var(--sans); text-decoration: underline; }
+.planned-form { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px 12px; background: var(--same-bg); padding: 22px; margin: 20px 0; }
+.planned-form h3 { font-size: 18px; margin: 0 0 8px; grid-column: 1/-1; }
+.plan-exercise-name, .plan-form-help, .planned-form > button, .planned-form .form-error { grid-column: 1/-1; }
+.plan-form-help { margin: 4px 0 8px; font-size: 14px; }
+.plan-record > input { max-width: 220px; display: block; }
+@media (max-width: 600px) {
+  .week-nav { gap: 8px; grid-template-columns: 1fr 1fr; }
+  .week-nav > span { grid-column: 1/-1; grid-row: 1; margin-bottom: 6px; }
+  .week-summary, .plan-card { padding: 18px; }
+  .goal-form { grid-template-columns: 1fr 72px; }
+  .goal-form .btn { grid-column: 1/-1; }
+  .activity-list li { grid-template-columns: 80px minmax(0,1fr); gap: 8px; }
+  .activity-list .back { grid-column: 2; justify-self: start; font: 16px var(--sans); }
+  .completion-date { flex-wrap: wrap; gap: 6px; }
+  .planned-form { padding: 16px; grid-template-columns: 1fr 1fr; }
+  .planned-form > div:nth-of-type(2) { grid-column: 1/-1; }
+  .planned-exercise { flex-direction: column; gap: 4px; }
+  .week-days { gap: 3px; }
+}
+@media (prefers-color-scheme: dark) {
+  .has-activity .day-dot.done { color: #211f1c; }
+}
+
+@media (max-width: 360px) {
+  .brand-bar { padding: calc(14px + env(safe-area-inset-top)) 18px 14px; }
+  .topbar { margin-top: 14px; }
+  .topbar h1 { font-size: 40px; margin-top: 8px; }
+  .eyebrow { padding-top: 8px; }
+  #page-note { font-size: 14px; margin: 6px 0 12px; }
+  .mode-switch { margin-bottom: 14px; }
+  .mode-switch button { min-height: 48px; }
+  .date-row { padding: 8px 0; }
+  .session-strip { padding: 8px 0; }
+  #add-exercise { margin-top: 16px; }
+}
+
+.goal-settings summary, .name-settings summary, .plan-form-disclosure summary { cursor: pointer; color: var(--marker); min-height: 44px; padding: 10px 0; font-size: 16px; font-weight: 600; }
+.goal-settings .goal-form { margin-top: 10px; }
+.name-settings { border-top: 1px solid var(--rule); margin-top: 16px; }
+.planned-form { align-items: end; }
+.week-summary p { margin-bottom: 8px; }
+
+.activity-status { color: var(--ink-2); }
+.activity-status.completed { color: var(--up); }

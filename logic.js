@@ -11,7 +11,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const MAX_WEIGHT = 2000;
   const MAX_REPS = 1000;
   const LB_PER_KG = 2.2046226218487757;
@@ -27,6 +27,13 @@
     copy.workouts.forEach(function (w) {
       w.exercises.forEach(function (e) {
         e.sets.forEach(function (set) { set.w = Math.min(set.w * factor, maxWeight(unit)); });
+      });
+    });
+    copy.weeks.forEach(function (week) {
+      week.sessions.forEach(function (session) {
+        session.exercises.forEach(function (exercise) {
+          exercise.sets.forEach(function (set) { set.w = Math.min(set.w * factor, maxWeight(unit)); });
+        });
       });
     });
     copy.unit = unit;
@@ -250,8 +257,98 @@
     return Array.from(map.values()).reverse();
   }
 
+  function shiftDate(iso, days) {
+    const parts = iso.split('-').map(Number);
+    return todayISO(new Date(parts[0], parts[1] - 1, parts[2] + days, 12));
+  }
+
+  /** Monday–Sunday, calculated in local calendar days (safe across DST). */
+  function weekStart(iso) {
+    const p = iso.split('-').map(Number);
+    const day = new Date(p[0], p[1] - 1, p[2], 12).getDay();
+    return shiftDate(iso, -((day + 6) % 7));
+  }
+
+  function newSession(index) {
+    return { id: newId(), name: 'Workout ' + (index + 1), notes: '', exercises: [], workoutId: null, completedOn: null };
+  }
+
+  function newWeek(start, goal) {
+    const count = goal || 4;
+    return { start: weekStart(start), goal: count, sessions: Array.from({ length: count }, function (_, i) { return newSession(i); }) };
+  }
+
+  function plannedSession(data, workoutId) {
+    if (!workoutId) return null;
+    for (const week of data.weeks || []) {
+      const session = week.sessions.find(function (s) { return s.workoutId === workoutId; });
+      if (session) return { week: week, session: session };
+    }
+    return null;
+  }
+
+  function startPlannedWorkout(data, week, session, date) {
+    if (!isISODate(date) || weekStart(date) !== week.start || date > todayISO()) throw new Error('Choose a date in this week, no later than today.');
+    let workout = data.workouts.find(function (w) { return w.id === session.workoutId; });
+    if (!workout) {
+      workout = { id: newId(), date: date, createdAt: Date.now(), label: session.name,
+        exercises: session.exercises.map(function (e) { return { name: e.name, sets: [] }; }) };
+      data.workouts.push(workout);
+      session.workoutId = workout.id;
+    }
+    workout.date = date;
+    if (session.completedOn) session.completedOn = date;
+    return workout;
+  }
+
+  function completePlannedWorkout(data, week, session, checked, date) {
+    if (checked && (!isISODate(date) || weekStart(date) !== week.start || date > todayISO())) {
+      throw new Error('Choose a completion date in this week, no later than today.');
+    }
+    session.completedOn = checked ? date : null;
+    const workout = data.workouts.find(function (w) { return w.id === session.workoutId; });
+    if (checked && workout) workout.date = date;
+  }
+
+  function copyWeek(source, start) {
+    return { start: weekStart(start), goal: source.goal, sessions: source.sessions.map(function (s) {
+      return { id: newId(), name: s.name, notes: s.notes, exercises: JSON.parse(JSON.stringify(s.exercises)), workoutId: null, completedOn: null };
+    }) };
+  }
+
+  function weekEvents(data, week) {
+    const events = week.sessions.filter(function (s) { return s.completedOn; }).map(function (s) {
+      return { date: s.completedOn, name: s.name, completed: true, workoutId: s.workoutId };
+    });
+    data.workouts.forEach(function (w) {
+      if (weekStart(w.date) !== week.start || !w.exercises.some(function (e) { return e.sets.length; })) return;
+      const link = plannedSession(data, w.id);
+      if (link && link.session.completedOn) return;
+      events.push({ date: w.date, name: w.label || 'Workout', completed: false, workoutId: w.id });
+    });
+    return events.sort(function (a, b) { return a.date.localeCompare(b.date); });
+  }
+
   function emptyData() {
-    return { version: SCHEMA_VERSION, unit: 'kg', workouts: [] };
+    return { version: SCHEMA_VERSION, unit: 'kg', workouts: [], weeks: [] };
+  }
+
+  function normalizeExercises(exercises, unit, date) {
+    return exercises.map(function (e) {
+      const name = cleanName(e && e.name).slice(0, 60);
+      if (!name || !Array.isArray(e.sets)) {
+        throw new Error('An exercise in workout ' + date + ' is damaged.');
+      }
+      return {
+        name: name,
+        sets: e.sets.map(function (s) {
+          const ok = s && Number.isFinite(s.w) && s.w >= 0 && s.w <= maxWeight(unit) + 1e-9 &&
+            Number.isInteger(s.r) && s.r >= 1 && s.r <= MAX_REPS;
+          if (!ok) throw new Error('A set of ' + name + ' on ' + date + ' is damaged.');
+          return { w: s.w, r: s.r };
+        }),
+      };
+    });
   }
 
   /** Validates and normalizes stored or imported data. Throws Error with a readable message. */
@@ -259,7 +356,7 @@
     if (!raw || typeof raw !== 'object' || !Array.isArray(raw.workouts)) {
       throw new Error('This file is not a Gym Log backup.');
     }
-    if (raw.version != null && raw.version !== SCHEMA_VERSION) throw new Error('Unsupported backup version.');
+    if (raw.version != null && raw.version !== 1 && raw.version !== SCHEMA_VERSION) throw new Error('Unsupported backup version.');
     const unit = raw.unit === 'lb' ? 'lb' : 'kg';
     const seen = new Set();
     const workouts = raw.workouts.map(function (w, i) {
@@ -273,28 +370,47 @@
         id: id,
         date: w.date,
         createdAt: Number.isFinite(w.createdAt) ? w.createdAt : 0,
-        exercises: w.exercises.map(function (e) {
-          const name = cleanName(e && e.name).slice(0, 60);
-          if (!name || !Array.isArray(e.sets)) {
-            throw new Error('An exercise in workout ' + w.date + ' is damaged.');
-          }
-          return {
-            name: name,
-            sets: e.sets.map(function (s) {
-              const ok = s && Number.isFinite(s.w) && s.w >= 0 && s.w <= maxWeight(unit) + 1e-9 &&
-                Number.isInteger(s.r) && s.r >= 1 && s.r <= MAX_REPS;
-              if (!ok) throw new Error('A set of ' + name + ' on ' + w.date + ' is damaged.');
-              return { w: s.w, r: s.r };
-            }),
-          };
-        }),
+        label: cleanName(w.label).slice(0, 60),
+        exercises: normalizeExercises(w.exercises, unit, w.date),
       };
     });
-    return { version: SCHEMA_VERSION, unit: unit, workouts: workouts };
+    if (raw.weeks != null && !Array.isArray(raw.weeks)) throw new Error('Weekly plans are damaged.');
+    const weekKeys = new Set(), linkedWorkouts = new Set();
+    const weeks = (raw.weeks || []).map(function (week) {
+      if (!week || !isISODate(week.start) || weekStart(week.start) !== week.start || weekKeys.has(week.start) ||
+          !Number.isInteger(week.goal) || week.goal < 1 || week.goal > 52 || !Array.isArray(week.sessions) || week.sessions.length > 100) {
+        throw new Error('A weekly plan is damaged.');
+      }
+      weekKeys.add(week.start);
+      const ids = new Set();
+      return { start: week.start, goal: week.goal, sessions: week.sessions.map(function (session) {
+        if (!session || typeof session.id !== 'string' || !session.id || ids.has(session.id) || !cleanName(session.name) || !Array.isArray(session.exercises)) {
+          throw new Error('A planned workout is damaged.');
+        }
+        ids.add(session.id);
+        const date = session.completedOn || null;
+        if (date && (!isISODate(date) || weekStart(date) !== week.start)) throw new Error('Completion date is outside its week.');
+        const workoutId = typeof session.workoutId === 'string' && workouts.some(function (w) { return w.id === session.workoutId; }) ? session.workoutId : null;
+        if (workoutId && linkedWorkouts.has(workoutId)) throw new Error('A workout is linked to multiple plans.');
+        if (workoutId) linkedWorkouts.add(workoutId);
+        return { id: session.id, name: cleanName(session.name).slice(0, 60), notes: String(session.notes || '').slice(0, 2000),
+          exercises: normalizeExercises(session.exercises, unit, week.start), completedOn: date, workoutId: workoutId };
+      }) };
+    });
+    return { version: SCHEMA_VERSION, unit: unit, workouts: workouts, weeks: weeks };
   }
 
   return {
     SCHEMA_VERSION: SCHEMA_VERSION,
+    shiftDate: shiftDate,
+    weekStart: weekStart,
+    newSession: newSession,
+    newWeek: newWeek,
+    plannedSession: plannedSession,
+    startPlannedWorkout: startPlannedWorkout,
+    completePlannedWorkout: completePlannedWorkout,
+    copyWeek: copyWeek,
+    weekEvents: weekEvents,
     convertUnit: convertUnit,
     cleanName: cleanName,
     keyOf: keyOf,
