@@ -70,12 +70,13 @@ is confined to decorative artwork. On phones, the save action has a full-width r
 
 ## Flexible weekly plans
 
-Use the **Log workout / Weekly plan** switch above the main view. Weeks run
+Use **Weekly plan** in the three-item main navigation. Weeks run
 Monday–Sunday. Choose a weekly goal (four workouts by default), name each workout,
-and add planned exercises with optional set/weight/repetition targets. Workouts
+and use **Edit plan** to add optional set/weight/repetition targets. Workouts
 have no assigned weekday or order. You can copy the previous week's plan.
 
-Open a workout and choose **Start logging this workout** to record actual sets.
+Open a workout and choose **Log sets** to record actual sets directly in that workout.
+Use **Start logging this workout** once for a new session.
 Targets prefill the form but never count as performed sets. Tick **Mark as
 completed** after training; change the completion date if you trained earlier in
 that week. Unchecking a workout keeps its logged sets. Multiple workouts on the
@@ -89,3 +90,29 @@ read the new backup format.
 
 Browser checks for the planner use the same local server and Playwright setup:
 `PLAYWRIGHT=/path/to/node_modules/playwright node tests/planner-e2e.js`.
+
+## Compact navigation (v1.2)
+
+- **Train**: open one exercise at a time, enter weight/repetitions, save the set.
+  **Options** groups **Manage sets** and **Remove exercise**. Delete controls appear
+  only while managing sets. Collapsed exercises retain their drafts and summaries.
+- **Weekly plan**: the weekly goal and activity strip stay visible. **Week options**
+  groups changing the goal, copying last week, and adding a workout. Inside a
+  workout, **Log sets / Edit plan / Name & notes** shows one focused task at a time.
+- **Review**: a four-week activity map, totals, then three destinations:
+  **Progress / History / Settings**. Settings has **Units / Backup & restore /
+  Help & reset**, with one folder open at a time.
+
+This uses progressive disclosure and task-based grouping, keeping frequent
+logging actions visible and less frequent editing behind named groups. Guidance:
+[Nielsen Norman Group](https://www.nngroup.com/articles/progressive-disclosure/)
+and [GitLab Pajamas](https://design.gitlab.com/patterns/progressive-disclosure/).
+The grouping is a heuristic based on the user's difficulty discovering the plan,
+not a claim of usability research with a participant sample. Menus and dialogs
+support keyboard use, Escape, and focus return. Workout storage and the backup
+schema are unchanged.
+
+Additional browser checks: `PLAYWRIGHT=/path/to/node_modules/playwright node
+tests/compact-e2e.js`. They verify the new hierarchy, absence of default destructive
+controls, independent task panes, draft retention, responsive layouts, and keyboard
+behavior. The existing workout and planner suites still exercise the full flows.

@@ -1,5 +1,5 @@
 /* Offline support: serve app files from cache, update them in the background. */
-const CACHE = 'gymlog-v6';
+const CACHE = 'gymlog-v7';
 // './index.html' is not listed: hosts like Cloudflare Pages redirect it to './',
 // and Safari refuses to show a redirected response served by a service worker.
 const FILES = [

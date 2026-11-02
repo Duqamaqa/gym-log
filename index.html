@@ -28,26 +28,22 @@
       <div class="eyebrow" aria-hidden="true"><span id="chapter">Workout log</span><span id="eyebrow-right"></span></div>
       <div class="page-heading"><h1 id="title">Today</h1></div>
       <p id="page-note">Add exercises and save each set.</p>
-      <div class="mode-switch" role="group" aria-label="Workout mode">
-        <button type="button" id="log-mode" aria-pressed="true">Log workout</button>
-        <button type="button" id="plan-mode" aria-pressed="false">Weekly plan</button>
-      </div>
+
     </div>
   </header>
 
   <main id="view" tabindex="-1"></main>
 
-  <aside class="margin-note" aria-label="How to log a workout"><span class="overline">How to log</span><ol><li>Add an exercise.</li><li>Enter the weight and repetitions.</li><li>Save each set.</li></ol><span class="note-rule"></span><small>Next workout, your previous sets appear for comparison.</small></aside>
   <nav class="tabbar" aria-label="Main">
-    <button type="button" data-tab="workout">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4M6 8v8M18 8v8M21 10v4M6 12h12"/></svg>Today</button>
-    <button type="button" data-tab="progress">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M4 16l5-6 4 3 7-8"/><path d="M16 5h4v4"/></svg>Progress</button>
-    <button type="button" data-tab="history">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5zM5 9h14M9 3v4M15 3v4"/></svg>History</button>
-    <button type="button" data-tab="settings">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+    <button type="button" data-tab="workout"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4M6 8v8M18 8v8M21 10v4M6 12h12"/></svg>Train</button>
+    <button type="button" data-tab="plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5zM5 9h14M9 3v4M15 3v4M9 14l2 2 4-4"/></svg>Weekly plan</button>
+    <button type="button" data-tab="review"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M4 16l5-6 4 3 7-8M16 5h4v4"/></svg>Review</button>
   </nav>
+
+  <dialog id="action-dialog" aria-labelledby="action-title">
+    <div class="sheet-heading"><h2 id="action-title"></h2><button type="button" class="sheet-close" aria-label="Close">Close</button></div>
+    <div id="action-content"></div>
+  </dialog>
 
   <dialog id="add-dialog" aria-labelledby="add-title">
     <form id="add-form" method="dialog">

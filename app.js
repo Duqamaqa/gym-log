@@ -66,7 +66,8 @@
   const unit = function () { return data.unit; };
 
   function fmtSet(s) {
-    return s.w > 0 ? L.fmtNum(s.w) + ' ' + unit() + ' × ' + s.r + ' reps' : 'Bodyweight × ' + s.r + ' reps';
+    const reps = s.r + (s.r === 1 ? ' rep' : ' reps');
+    return s.w > 0 ? L.fmtNum(s.w) + ' ' + unit() + ' × ' + reps : 'Bodyweight × ' + reps;
   }
 
   function fmtSetShort(s) {
@@ -105,15 +106,21 @@
     planSessionId: null,
     workoutId: null,
     planExerciseKey: null,
+    activeExerciseKey: null,
+    manageExerciseKey: null,
+    planPane: null,
+    settingsGroup: null,
     progressKey: null, // exercise key when viewing one exercise's progress
   };
 
   const titles = { workout: 'Today', progress: 'Progress', history: 'History', settings: 'Settings' };
 
   function go(tab) {
+    if (tab === 'settings' && ui.tab !== 'settings') ui.settingsGroup = null;
     ui.tab = tab;
     if (tab !== 'progress') ui.progressKey = null;
     render();
+    document.getElementById('view').focus({ preventScroll: true });
     window.scrollTo(0, 0);
   }
 
@@ -126,28 +133,26 @@
     });
   });
 
-  document.getElementById('log-mode').addEventListener('click', function () { go('workout'); });
-  document.getElementById('plan-mode').addEventListener('click', function () { go('plan'); });
-
   function render() {
     const view = document.getElementById('view');
     const title = document.getElementById('title');
     const eyebrow = document.getElementById('eyebrow-right');
     view.replaceChildren();
     document.body.dataset.view = ui.tab;
-    document.getElementById('log-mode').setAttribute('aria-pressed', ui.tab === 'plan' ? 'false' : 'true');
-    document.getElementById('plan-mode').setAttribute('aria-pressed', ui.tab === 'plan' ? 'true' : 'false');
-    const n = data.workouts.filter(function (w) { return w.exercises.some(function (e) { return e.sets.length; }); }).length;
     eyebrow.textContent = ui.tab === 'workout'
       ? fmtDate(ui.date, { day: 'numeric', month: 'short', year: 'numeric' })
-      : n + (n === 1 ? ' workout' : ' workouts');
+      : '';
     document.querySelectorAll('.tabbar button').forEach(function (b) {
-      if (b.getAttribute('data-tab') === (ui.tab === 'plan' ? 'workout' : ui.tab)) b.setAttribute('aria-current', 'page');
+      if (b.getAttribute('data-tab') === (['workout', 'plan'].includes(ui.tab) ? ui.tab : 'review')) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
-    document.getElementById('chapter').textContent = { plan: 'Flexible training', workout: 'Workout log', progress: 'Exercise progress', history: 'Past workouts', settings: 'Preferences & backup' }[ui.tab];
-    document.getElementById('page-note').textContent = { plan: 'Set a weekly goal. Train on any day, in any order.', workout: 'Add exercises and save each set.', progress: 'Choose an exercise to compare your weights and repetitions over time.', history: 'Open a past workout to review or edit your sets.', settings: 'Change weight units, back up your workouts, or restore a saved file.' }[ui.tab];
-    if (ui.tab === 'plan') {
+    document.getElementById('chapter').textContent = { review: 'Your training, at a glance', plan: 'Flexible training', workout: 'Workout log', progress: 'Exercise progress', history: 'Past workouts', settings: 'Preferences & backup' }[ui.tab];
+    document.getElementById('page-note').textContent = { review: 'Progress, past workouts, and your preferences.', plan: 'Set a weekly goal. Train on any day, in any order.', workout: 'Add exercises and save each set.', progress: 'Choose an exercise to compare your weights and repetitions over time.', history: 'Open a past workout to review or edit your sets.', settings: 'Change weight units, back up your workouts, or restore a saved file.' }[ui.tab];
+    if (['history', 'settings'].includes(ui.tab) || (ui.tab === 'progress' && !ui.progressKey)) view.append(h('button', { type: 'button', class: 'back', onclick: function () { go('review'); } }, '← Review'));
+    if (ui.tab === 'review') {
+      title.textContent = 'Review';
+      renderReview(view);
+    } else if (ui.tab === 'plan') {
       title.textContent = 'Weekly plan';
       renderPlan(view);
     } else if (ui.tab === 'workout') {
@@ -163,6 +168,73 @@
       title.textContent = titles.settings;
       renderSettings(view);
     }
+    if (focusAfterRender) {
+      const target = view.querySelector('[data-reps-for="' + CSS.escape(focusAfterRender) + '"]');
+      focusAfterRender = null;
+      if (target) target.focus();
+    }
+  }
+
+  // Menus use native details/summary; dialogs use native focus trapping and Escape.
+  function actionMenu(label, items, ariaLabel) {
+    const menu = h('details', { class: 'action-menu' });
+    const trigger = h('summary', { text: label, 'aria-label': ariaLabel || label });
+    menu.append(trigger, h('div', { class: 'action-menu-items' }, items.map(function (item) {
+      return h('button', { type: 'button', disabled: !!item.disabled, class: item.danger ? 'danger-text' : '',
+        onclick: function () { menu.open = false; trigger.focus(); item.run(); } }, item.label);
+    })));
+    menu.addEventListener('toggle', function () {
+      if (menu.open && menu.isConnected) document.querySelectorAll('.action-menu[open]').forEach(function (other) { if (other !== menu) other.open = false; });
+    });
+    return menu;
+  }
+
+  const actionDialog = document.getElementById('action-dialog');
+  document.querySelector('.sheet-close').addEventListener('click', function () { actionDialog.close(); });
+  actionDialog.addEventListener('click', function (e) {
+    const box = actionDialog.getBoundingClientRect();
+    if (e.target === actionDialog && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom)) actionDialog.close();
+  });
+  document.addEventListener('click', function (e) {
+    document.querySelectorAll('.action-menu[open]').forEach(function (menu) { if (!menu.contains(e.target)) menu.open = false; });
+  });
+  document.addEventListener('pointerdown', function () { delete document.body.dataset.keyboard; });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Tab') document.body.dataset.keyboard = 'true';
+    if (e.key === 'Escape') document.querySelectorAll('.action-menu[open]').forEach(function (menu) { menu.open = false; menu.querySelector('summary').focus(); });
+  });
+  function openSheet(title, content) {
+    document.getElementById('action-title').textContent = title;
+    document.getElementById('action-content').replaceChildren(content);
+    actionDialog.showModal();
+  }
+
+  function renderReview(view) {
+    const workouts = data.workouts.filter(function (w) { return w.exercises.some(function (e) { return e.sets.length; }); });
+    const completedWithoutSets = data.weeks.flatMap(function (w) { return w.sessions; }).filter(function (session) { return session.completedOn && !workouts.some(function (w) { return w.id === session.workoutId; }); }).length;
+    const setCount = workouts.reduce(function (sum, w) { return sum + w.exercises.reduce(function (n, e) { return n + e.sets.length; }, 0); }, 0);
+    view.append(h('div', { class: 'review-totals' }, stat('Workouts', String(workouts.length + completedWithoutSets)), stat('Sets logged', String(setCount)), stat('Exercises', String(L.exerciseSummaries(data.workouts).length))));
+    const map = h('section', { class: 'activity-map', 'aria-label': 'Training activity over the last four weeks' },
+      h('div', { class: 'section-heading' }, h('h2', { text: '4-week activity' }), h('span', { class: 'muted', text: 'Days you trained' })));
+    const days = h('div', { class: 'activity-grid' });
+    const start = L.shiftDate(L.weekStart(L.todayISO()), -21);
+    const completedDates = new Set(data.weeks.flatMap(function (w) { return w.sessions.filter(function (s) { return s.completedOn; }).map(function (s) { return s.completedOn; }); }));
+    for (let i = 0; i < 28; i++) {
+      const date = L.shiftDate(start, i), entries = workouts.filter(function (w) { return w.date === date; });
+      const active = entries.length || completedDates.has(date);
+      const label = fmtDate(date) + ': ' + (active ? entries.length ? entries.map(function (w) { return w.label || w.exercises.map(function (e) { return e.name; }).join(', '); }).join('; ') : 'Workout completed' : date > L.todayISO() ? 'Upcoming' : 'No workout');
+      days.append(h('span', { class: 'activity-cell' + (active ? ' active' : '') + (date === L.todayISO() ? ' current' : '') + (date > L.todayISO() ? ' future' : ''), role: 'img', 'aria-label': label, title: label },
+        h('span', { text: String(Number(date.slice(-2))) })));
+    }
+    const dayLabels = h('div', { class: 'map-weekdays', 'aria-hidden': 'true' }, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (day) { return h('span', { text: day }); }));
+    map.append(dayLabels, days, h('p', { class: 'muted small', text: 'Filled squares mark days with logged sets or a completed workout.' }));
+    view.append(map);
+    const choices = h('div', { class: 'review-choices', 'aria-label': 'Review categories' });
+    [['progress', 'Progress', 'Exercise charts and personal bests'], ['history', 'History', 'Find and edit a past workout'], ['settings', 'Settings', 'Units, backups, and app help']].forEach(function (choice) {
+      choices.append(h('button', { type: 'button', class: 'review-choice', 'aria-label': choice[1], onclick: function () { go(choice[0]); } },
+        h('span', null, h('strong', { text: choice[1] }), h('span', { class: 'muted', text: choice[2] })), h('span', { 'aria-hidden': 'true', text: '→' })));
+    });
+    view.insertBefore(choices, map);
   }
 
   // ---------- data helpers ----------
@@ -251,35 +323,38 @@
     if (emptyState) view.insertBefore(addButton, emptyState);
     else view.append(addButton);
 
-    if (focusAfterRender) {
-      const target = view.querySelector('[data-reps-for="' + CSS.escape(focusAfterRender) + '"]');
-      focusAfterRender = null;
-      if (target) target.focus();
-    }
+
   }
 
   function exerciseCard(w, ex, index) {
     const prev = L.previousPerformance(data.workouts, ex.name, w);
     const key = L.keyOf(ex.name);
 
-    const card = h('section', { class: 'card exercise-card', 'aria-label': ex.name });
-    card.append(h('div', { class: 'exercise-index', text: 'Exercise ' + (index + 1) }));
-    card.append(h('div', { class: 'card-head' },
-      h('h2', { text: ex.name }),
-      h('button', {
-        type: 'button', class: 'icon-btn remove-exercise', 'aria-label': 'Remove ' + ex.name,
-        onclick: function () {
-          const msg = ex.sets.length
-            ? 'Remove “' + ex.name + '” and its ' + ex.sets.length + ' set(s) from this workout?'
-            : 'Remove “' + ex.name + '”?';
-          if (!confirm(msg)) return;
-          w.exercises = w.exercises.filter(function (x) { return x !== ex; });
-          dropEmptyWorkout(w);
-          save();
-          render();
-        },
-      }, 'Remove')
-    ));
+    const card = h('section', { class: 'exercise-card', 'aria-label': ex.name });
+    const knownActive = w.exercises.some(function (e) { return L.keyOf(e.name) === ui.activeExerciseKey; });
+    const disclosure = h('details', { class: 'exercise-disclosure', name: 'workout-' + w.id, open: knownActive ? ui.activeExerciseKey === key : index === 0 });
+    const last = ex.sets[ex.sets.length - 1];
+    disclosure.append(h('summary', { class: 'exercise-summary' },
+      h('span', { class: 'exercise-order', text: String(index + 1).padStart(2, '0') }),
+      h('span', null, h('strong', { text: ex.name }), h('span', { class: 'exercise-preview', text: ex.sets.length + (ex.sets.length === 1 ? ' set' : ' sets') + (last ? ' · ' + fmtSet(last) : ' · Ready to log') })),
+      h('span', { class: 'disclosure-chevron', 'aria-hidden': 'true', text: '⌄' })));
+    disclosure.addEventListener('toggle', function () {
+      if (!disclosure.open || !disclosure.isConnected) return;
+      ui.activeExerciseKey = key;
+      document.querySelectorAll('.exercise-disclosure[open]').forEach(function (other) { if (other !== disclosure) other.open = false; });
+    });
+    const content = h('div', { class: 'exercise-body' });
+    const controls = h('div', { class: 'exercise-toolbar' }, actionMenu('Options', [
+      { label: 'Manage sets', disabled: !ex.sets.length, run: function () { ui.manageExerciseKey = key; ui.activeExerciseKey = key; render(); } },
+      { label: 'Remove exercise', danger: true, run: function () {
+        if (!confirm('Remove “' + ex.name + '”' + (ex.sets.length ? ' and its logged sets' : '') + ' from this workout?')) return;
+        w.exercises = w.exercises.filter(function (x) { return x !== ex; });
+        dropEmptyWorkout(w); save(); render();
+      } }
+    ], 'Exercise options for ' + ex.name));
+    if (ui.manageExerciseKey === key) controls.prepend(h('button', { type: 'button', class: 'back', onclick: function () { ui.manageExerciseKey = null; render(); } }, 'Done managing sets'));
+    if (!prev) controls.prepend(h('p', { class: 'first-time-note muted', text: 'First time logging this exercise.' }));
+    content.append(controls);
 
     if (prev) {
       const sug = L.suggestNext(prev.sets, unit());
@@ -287,13 +362,11 @@
       if (sug.moreReps) goal.append(h('mark', { text: fmtSet(sug.moreReps) }));
       if (sug.moreWeight) goal.append(sug.moreReps ? ' or ' : '', h('mark', { text: fmtSet(sug.moreWeight) }));
       if (!sug.moreReps && !sug.moreWeight) goal.append('At the logging limit.');
-      card.append(h('div', { class: 'last-time' },
+      content.append(h('div', { class: 'last-time' },
         h('strong', { text: 'Last time · ' + relDate(prev.date) }),
         h('div', { class: 'lt-sets', text: prev.sets.map(fmtSet).join('  ·  ') }),
         goal
       ));
-    } else {
-      card.append(h('p', { class: 'muted small', text: 'First time — this will be your starting point.' }));
     }
 
     if (ex.sets.length) {
@@ -305,7 +378,7 @@
           h('span', { class: 'num', text: 'Set ' + (i + 1) }),
           h('span', { class: 'val', text: fmtSet(s) }),
           prev ? h('span', { class: 'badge ' + ch.status, text: arrow + ch.text }) : null,
-          h('button', {
+          ui.manageExerciseKey === key ? h('button', {
             type: 'button', class: 'icon-btn', 'aria-label': 'Delete set ' + (i + 1), text: 'Delete',
             onclick: function () {
               ex.sets.splice(i, 1);
@@ -313,10 +386,10 @@
               render();
               if (saved) toast('Set deleted');
             },
-          })
+          }) : null
         ));
       });
-      card.append(list);
+      content.append(list);
     }
 
     // Prefill with the matching set from last time, else the previous set today.
@@ -357,7 +430,9 @@
       h('div', null, h('label', { for: rIn.id, text: 'Repetitions' }), rIn),
       h('button', { type: 'submit', class: 'btn primary', text: 'Save set ' + (n + 1) })
     );
-    card.append(form, err, h('p', { class: 'muted small bodyweight-hint', text: 'Bodyweight exercise? Leave weight at 0.' }));
+    content.append(form, err, h('p', { class: 'muted small bodyweight-hint', text: 'Bodyweight exercise? Leave weight at 0.' }));
+    disclosure.append(content);
+    card.append(disclosure);
     return card;
   }
 
@@ -379,6 +454,7 @@
       if (!save()) { render(); return; }
     }
     dlg.close();
+    ui.activeExerciseKey = L.keyOf(clean);
     focusAfterRender = L.keyOf(clean);
     render();
   }
@@ -428,7 +504,7 @@
       (L.todayISO() < week.start ? week.start : L.todayISO() > L.shiftDate(week.start, 6) ? L.shiftDate(week.start, 6) : L.todayISO());
   }
 
-  function completionControl(week, session) {
+  function completionControl(week, session, compact) {
     const box = h('input', {
       type: 'checkbox', checked: !!session.completedOn,
       disabled: week.start > L.todayISO(), 'aria-label': 'Mark ' + session.name + ' complete',
@@ -441,11 +517,13 @@
       },
     });
     const wrap = h('div', { class: 'completion-control' },
-      h('label', { class: 'completion-label' }, box, h('span', { text: session.completedOn ? 'Completed' : 'Mark as completed' }))
+      h('label', { class: 'completion-label' }, box, h('span', { text: session.completedOn ? 'Done' : 'Mark done' }))
     );
-    if (session.completedOn) {
+    if (session.completedOn && compact) wrap.append(h('span', { class: 'completion-stamp', text: fmtDate(session.completedOn, { weekday: 'short', day: 'numeric', month: 'short' }) }));
+    if (session.completedOn && !compact) {
       const id = 'completed-' + session.id;
-      wrap.append(h('label', { class: 'completion-date', for: id }, 'Completed on',
+      const dateOptions = h('details', { class: 'completion-options' }, h('summary', { text: fmtDate(session.completedOn, { weekday: 'short', day: 'numeric', month: 'short' }) + ' · Change date' }));
+      dateOptions.append(h('label', { class: 'completion-date', for: id }, 'Completed on',
         h('input', { id: id, type: 'date', value: session.completedOn, min: week.start,
           max: L.shiftDate(week.start, 6) < L.todayISO() ? L.shiftDate(week.start, 6) : L.todayISO(),
           onchange: function (e) {
@@ -457,6 +535,7 @@
           },
         })
       ));
+      wrap.append(dateOptions);
     }
     return wrap;
   }
@@ -466,17 +545,17 @@
     const end = L.shiftDate(week.start, 6);
     document.getElementById('eyebrow-right').textContent = fmtDate(week.start, { day: 'numeric', month: 'short' }) + ' – ' + fmtDate(end, { day: 'numeric', month: 'short' });
     const nav = h('div', { class: 'week-nav', 'aria-label': 'Choose week' },
-      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Previous week', onclick: function () { changeWeek(-7); } }, '← Previous'),
+      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Previous week', onclick: function () { changeWeek(-7); } }, '←'),
       h('span', { text: fmtDate(week.start, { day: 'numeric', month: 'short' }) + ' – ' + fmtDate(end, { day: 'numeric', month: 'short', year: 'numeric' }) }),
-      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Next week', onclick: function () { changeWeek(7); } }, 'Next →')
+      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Next week', onclick: function () { changeWeek(7); } }, '→')
     );
-    view.append(nav);
     if (week.start !== L.weekStart(L.todayISO())) view.append(h('button', { type: 'button', class: 'back', onclick: function () { ui.week = L.weekStart(L.todayISO()); ui.planSessionId = null; render(); } }, 'Return to this week'));
     if (ui.planSessionId) {
       const session = week.sessions.find(function (s) { return s.id === ui.planSessionId; });
       if (session) { renderPlanSession(view, week, session); return; }
       ui.planSessionId = null;
     }
+    view.append(nav);
     const completed = week.sessions.filter(function (s) { return !!s.completedOn; }).length;
     const summary = h('section', { class: 'week-summary', 'aria-label': 'Weekly goal' },
       h('div', { class: 'week-count' }, h('strong', { text: String(completed) }), h('span', { text: 'of ' + week.goal + ' workouts completed' })),
@@ -485,7 +564,7 @@
     );
     const goalInput = h('input', { type: 'number', id: 'weekly-goal', min: 1, max: 52, value: week.goal, inputmode: 'numeric', required: true });
     const error = h('p', { class: 'form-error', role: 'alert' });
-    const goalSettings = h('details', { class: 'goal-settings' }, h('summary', { text: 'Change weekly goal' }));
+    const goalSettings = h('div', { class: 'goal-settings' });
     goalSettings.append(h('form', { class: 'goal-form', onsubmit: function (e) {
       e.preventDefault();
       const goal = Number(goalInput.value);
@@ -498,34 +577,34 @@
         if (last.completedOn || last.workoutId || last.exercises.length || last.notes || last.name !== 'Workout ' + week.sessions.length) break;
         week.sessions.pop();
       }
-      if (commitWeek(week)) toast('Weekly goal saved');
+      if (commitWeek(week)) { actionDialog.close(); toast('Weekly goal saved'); }
+      else error.textContent = 'Your goal was not saved. Browser storage is full or blocked.';
       render();
     } }, h('label', { for: 'weekly-goal', text: 'Workouts this week' }), goalInput,
       h('button', { type: 'submit', class: 'btn ghost', text: 'Save goal' })), error);
-    summary.append(goalSettings);
     view.append(summary);
-    renderWeekTimeline(view, week);
     const previous = data.weeks.find(function (w) { return w.start === L.shiftDate(week.start, -7); });
     const untouched = week.sessions.every(function (s, i) { return !s.workoutId && !s.completedOn && !s.exercises.length && !s.notes && s.name === 'Workout ' + (i + 1); });
-    if (previous && untouched) view.append(h('button', { type: 'button', class: 'btn ghost block', onclick: function () {
-      const copy = L.copyWeek(previous, week.start);
-      if (commitWeek(copy)) toast('Copied exercises and targets. Completion starts fresh.');
-      render();
-    } }, 'Copy previous week’s plan'));
-    view.append(h('div', { class: 'plan-section-heading' }, h('h2', { text: 'Your workouts' }), h('p', { class: 'muted', text: 'Open a workout to plan exercises or record your sets.' })));
+    const weekMenu = actionMenu('Week options', [
+      { label: 'Change weekly goal', run: function () { openSheet('Weekly goal', goalSettings); } },
+      { label: 'Copy previous week’s plan', disabled: !previous || !untouched, run: function () {
+        const copy = L.copyWeek(previous, week.start);
+        if (commitWeek(copy)) toast('Copied exercises and targets. Completion starts fresh.');
+        render();
+      } },
+      { label: 'Add another workout', disabled: week.sessions.length >= 100, run: function () { week.sessions.push(L.newSession(week.sessions.length)); commitWeek(week); render(); } }
+    ]);
+    view.append(h('div', { class: 'plan-section-heading' }, h('div', { class: 'section-heading' }, h('h2', { text: 'Your workouts' }), weekMenu), h('p', { class: 'muted', text: 'Open a workout to plan exercises or record your sets.' })));
     week.sessions.forEach(function (session, i) {
       const card = h('section', { class: 'plan-card' + (session.completedOn ? ' is-complete' : ''), 'aria-label': session.name });
-      card.append(h('div', { class: 'exercise-index', text: 'Workout ' + (i + 1) }),
-        h('h2', { text: session.name }), completionControl(week, session));
+      card.append(h('h2', { text: session.name }), completionControl(week, session, true));
       if (session.exercises.length) card.append(h('p', { class: 'planned-names', text: session.exercises.map(function (e) { return e.name; }).join(' · ') }));
       else card.append(h('p', { class: 'muted', text: 'No exercises planned yet.' }));
-      card.append(h('button', { type: 'button', class: 'btn ghost block', onclick: function () { ui.planSessionId = session.id; ui.planExerciseKey = null; render(); window.scrollTo(0, 0); } }, 'Open ' + session.name));
+      card.append(h('button', { type: 'button', class: 'btn ghost block', onclick: function () { ui.planSessionId = session.id; ui.planExerciseKey = null; ui.planPane = session.exercises.length ? 'log' : 'exercises'; render(); window.scrollTo(0, 0); } }, 'Open ' + session.name));
       view.append(card);
     });
-    view.append(h('button', { type: 'button', class: 'btn ghost block', disabled: week.sessions.length >= 100, onclick: function () {
-      week.sessions.push(L.newSession(week.sessions.length));
-      commitWeek(week); render();
-    } }, 'Add another workout'));
+
+    renderWeekTimeline(view, week);
   }
 
   function changeWeek(days) {
@@ -558,14 +637,21 @@
           w ? h('button', { type: 'button', class: 'back', 'aria-label': 'View sets for ' + event.name, onclick: function () { ui.date = w.date; ui.workoutId = w.id; go('workout'); } }, 'View sets') : null
         ));
       });
-      timeline.append(list);
+      const activity = h('details', { class: 'activity-disclosure' }, h('summary', { text: 'Activity details · ' + events.length + (events.length === 1 ? ' entry' : ' entries') }));
+      activity.append(list); timeline.append(activity);
     }
     view.append(timeline);
   }
 
   function renderPlanSession(view, week, session) {
     view.append(h('button', { type: 'button', class: 'back', onclick: function () { ui.planSessionId = null; ui.planExerciseKey = null; render(); } }, '← All weekly workouts'));
-    const header = h('section', { class: 'plan-detail', 'aria-label': 'Plan ' + session.name }, h('h2', { text: session.name }), completionControl(week, session));
+    document.getElementById('title').textContent = session.name;
+    document.getElementById('page-note').textContent = 'Log your sets or edit this workout’s plan.';
+    const header = h('section', { class: 'plan-detail', 'aria-label': 'Plan ' + session.name }, completionControl(week, session));
+    const pane = ui.planPane || (session.exercises.length ? 'log' : 'exercises');
+    const tasks = h('div', { class: 'task-switch', role: 'group', 'aria-label': 'Workout tasks' });
+    [['log', 'Log sets'], ['exercises', 'Edit plan'], ['details', 'Name & notes']].forEach(function (task) { tasks.append(h('button', { type: 'button', 'aria-pressed': pane === task[0] ? 'true' : 'false', onclick: function () { ui.planPane = task[0]; render(); } }, task[1])); });
+    header.append(tasks);
     const draftKey = 'plan-name:' + session.id;
     const draft = drafts.get(draftKey);
     const name = h('input', { id: 'session-name', type: 'text', value: draft ? draft.name : session.name, maxlength: 60, required: true });
@@ -573,7 +659,7 @@
     notes.value = draft ? draft.notes : session.notes;
     function keep() { drafts.set(draftKey, { name: name.value, notes: notes.value }); }
     name.addEventListener('input', keep); notes.addEventListener('input', keep);
-    const nameSettings = h('details', { class: 'name-settings', open: /^Workout \d+$/.test(session.name) && !session.exercises.length }, h('summary', { text: 'Edit workout name & notes' }));
+    const nameSettings = h('section', { class: 'name-settings', hidden: pane !== 'details' }, h('h2', { text: 'Workout details' }));
     nameSettings.append(h('form', { class: 'plan-name-form', onsubmit: function (e) {
       e.preventDefault();
       const clean = L.cleanName(name.value);
@@ -588,21 +674,21 @@
       h('button', { type: 'submit', class: 'btn ghost', text: 'Save workout details' })));
     header.append(nameSettings);
     view.append(header);
-    const targets = h('section', { class: 'plan-targets', 'aria-label': 'Planned exercises' },
+    const targets = h('section', { class: 'plan-targets', hidden: pane !== 'exercises', 'aria-label': 'Planned exercises' },
       h('h2', { text: 'Planned exercises' }),
       h('p', { class: 'muted', text: 'These are targets. Use the workout log to record actual sets.' })
     );
     session.exercises.forEach(function (exercise) {
       targets.append(h('div', { class: 'planned-exercise' },
         h('div', null, h('strong', { text: exercise.name }), h('p', { text: exercise.sets.length ? exercise.sets.length + ' sets · ' + exercise.sets.map(fmtSet).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(' / ') : 'No weight or repetition target yet' })),
-        h('div', { class: 'plan-row-actions' },
-          h('button', { type: 'button', class: 'back', 'aria-label': 'Edit planned ' + exercise.name, onclick: function () { ui.planExerciseKey = L.keyOf(exercise.name); render(); document.getElementById('planned-name').focus(); } }, 'Edit'),
-          h('button', { type: 'button', class: 'back', 'aria-label': 'Remove planned ' + exercise.name, onclick: function () {
+        actionMenu('Options', [
+          { label: 'Edit target', run: function () { ui.planExerciseKey = L.keyOf(exercise.name); render(); document.getElementById('planned-name').focus(); } },
+          { label: 'Remove planned exercise', danger: true, run: function () {
             if (!confirm('Remove ' + exercise.name + ' from this plan? Any logged sets will be kept.')) return;
             session.exercises = session.exercises.filter(function (e) { return e !== exercise; });
             ui.planExerciseKey = null; commitWeek(week); render();
-          } }, 'Remove')
-        )
+          } }
+        ], 'Plan options for ' + exercise.name)
       ));
     });
     const exerciseEditor = h('details', { class: 'plan-form-disclosure', open: !!ui.planExerciseKey }, h('summary', { text: ui.planExerciseKey ? 'Edit exercise target' : 'Add planned exercise' }));
@@ -611,23 +697,38 @@
     view.append(targets);
     const actual = data.workouts.find(function (w) { return w.id === session.workoutId; });
     const dateDraftKey = 'plan-date:' + session.id;
-    const date = h('input', { type: 'date', id: 'planned-log-date', value: drafts.get(dateDraftKey) || (actual ? actual.date : completionDate(week, session)),
+    const date = h('input', { type: 'date', id: 'planned-log-date', value: actual ? actual.date : drafts.get(dateDraftKey) || completionDate(week, session),
       min: week.start, max: L.shiftDate(week.start, 6) < L.todayISO() ? L.shiftDate(week.start, 6) : L.todayISO(),
-      onchange: function () { drafts.set(dateDraftKey, date.value); } });
-    const record = h('section', { class: 'plan-record', 'aria-label': 'Actual workout' }, h('h2', { text: 'Record what you did' }),
-      h('p', { class: 'muted', text: actual ? 'Your saved sets are in the workout log. Open it to continue.' : 'Choose the date you trained. Enter your actual weight and repetitions in the workout log.' }),
-      h('label', { for: date.id, text: 'Workout date' }), date,
-      h('button', { type: 'button', class: 'btn primary block', disabled: week.start > L.todayISO(), onclick: function () {
-        try {
-          const workout = L.startPlannedWorkout(data, week, session, date.value);
-          // New planned exercises are added without copying targets into actual results.
-          session.exercises.forEach(function (e) { if (!L.findExercise(workout, e.name)) workout.exercises.push({ name: e.name, sets: [] }); });
-          if (!commitWeek(week)) { render(); return; }
-          ui.date = workout.date; ui.workoutId = workout.id; go('workout');
-        } catch (err) { toast(err.message); }
-      } }, actual ? 'Open workout log' : 'Start logging this workout')
-    );
+      onchange: function () {
+        drafts.set(dateDraftKey, date.value);
+        if (actual) {
+          try {
+            L.startPlannedWorkout(data, week, session, date.value);
+            if (commitWeek(week)) { ui.date = date.value; drafts.delete(dateDraftKey); toast('Workout date saved'); }
+          } catch (err) { toast(err.message); }
+          render();
+        }
+      } });
+    const record = h('section', { class: 'plan-record', hidden: pane !== 'log', 'aria-label': 'Actual workout' },
+      h('div', { class: 'date-row' }, h('label', { for: date.id, text: 'Workout date' }), date));
+    if (actual && pane === 'log') {
+      ui.date = actual.date; ui.workoutId = actual.id;
+      const count = actual.exercises.reduce(function (sum, exercise) { return sum + exercise.sets.length; }, 0);
+      record.append(h('div', { class: 'session-strip' }, h('span', { text: actual.exercises.length + (actual.exercises.length === 1 ? ' exercise' : ' exercises') }), h('span', { text: count + (count === 1 ? ' set saved' : ' sets saved') })));
+      actual.exercises.forEach(function (exercise, i) { record.append(exerciseCard(actual, exercise, i)); });
+      record.append(h('button', { type: 'button', class: 'btn primary block', onclick: openAddDialog }, '＋ Add exercise'));
+    } else if (!actual) {
+      record.append(h('p', { class: 'muted', text: 'Choose when you trained, then start recording your sets.' }),
+        h('button', { type: 'button', class: 'btn primary block', disabled: week.start > L.todayISO(), onclick: function () {
+          try {
+            const workout = L.startPlannedWorkout(data, week, session, date.value);
+            if (!commitWeek(week)) { render(); return; }
+            ui.date = workout.date; ui.workoutId = workout.id; ui.planPane = 'log'; render();
+          } catch (err) { toast(err.message); }
+        } }, 'Start logging this workout'));
+    }
     if (week.start > L.todayISO()) record.append(h('p', { class: 'muted', text: 'You can plan ahead. Logging and completion become available when this week begins.' }));
+
     view.insertBefore(record, targets);
   }
 
@@ -657,6 +758,8 @@
       }
       if (existing) { existing.name = clean; existing.sets = sets; }
       else session.exercises.push({ name: clean, sets: sets });
+      const actual = data.workouts.find(function (w) { return w.id === session.workoutId; });
+      if (actual && !L.findExercise(actual, clean)) actual.exercises.push({ name: clean, sets: [] });
       if (commitWeek(week)) { drafts.delete(key); ui.planExerciseKey = null; toast('Planned exercise saved'); }
       render();
     } },
@@ -709,13 +812,6 @@
     Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
     if (text != null) el.textContent = text;
     return el;
-  }
-
-  /** Small hand-drawn style bin icon (same stroke style as the tab bar). */
-  function trashIcon() {
-    const svg = s('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', class: 'ico' });
-    svg.append(s('path', { d: 'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v6M14 11v6' }));
-    return svg;
   }
 
   /** Simple line chart of one value per session. */
@@ -847,7 +943,7 @@
         onclick: function () {
           if (data.unit === o[0]) return;
           data = L.convertUnit(data, o[0]);
-          if (save()) drafts.clear();
+          if (save()) { drafts.clear(); toast('Weights converted to ' + o[0]); }
           render();
         },
       }));
@@ -884,6 +980,19 @@
         },
       }, 'Delete all data')
     ));
+    const sections = Array.from(view.querySelectorAll(':scope > section.card'));
+    const groups = [['Units', 'Kilograms or pounds', [sections[0]]], ['Backup & restore', 'Keep a copy of workouts and plans', [sections[1]]], ['Help & reset', 'Install the app or delete device data', [sections[2], sections[3]]]];
+    groups.forEach(function (group) {
+      const folder = h('details', { class: 'settings-group', name: 'settings-folders', open: ui.settingsGroup === group[0] }, h('summary', null, h('strong', { text: group[0] }), h('span', { class: 'muted', text: group[1] })));
+      folder.addEventListener('toggle', function () {
+        if (!folder.isConnected) return;
+        if (folder.open) { ui.settingsGroup = group[0]; view.querySelectorAll('.settings-group[open]').forEach(function (other) { if (other !== folder) other.open = false; }); }
+        else if (ui.settingsGroup === group[0]) ui.settingsGroup = null;
+      });
+      group[2].forEach(function (section) { folder.append(section); });
+      view.append(folder);
+    });
+
   }
 
   function exportData() {

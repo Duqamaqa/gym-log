@@ -25,6 +25,14 @@ function isoDaysAgo(n) {
   delete iphone.defaultBrowserType;
   const context = await browser.newContext(iphone);
   const page = await context.newPage();
+  async function reviewPage(name) {
+    await page.getByRole('button', { name: 'Review', exact: true }).click();
+    await page.getByRole('button', { name: name, exact: true }).click();
+  }
+  async function expandCard(card) {
+    if (!await card.locator('details.exercise-disclosure').evaluate(el => el.open)) await card.locator('.exercise-summary').click();
+  }
+
   const errors = [];
   page.on('pageerror', function (e) { errors.push(e.message); });
   page.on('console', function (m) { if (m.type() === 'error') errors.push(m.text()); });
@@ -105,7 +113,8 @@ function isoDaysAgo(n) {
   const unsafeCard = page.getByRole('region', { name: '<img src=x onerror=alert(1)> Squat' });
   await unsafeCard.getByText('First time').waitFor();
   assert.equal(await page.locator('main img').count(), 0, 'no HTML injected');
-  await unsafeCard.getByRole('button', { name: 'Remove <img src=x onerror=alert(1)> Squat', exact: true }).click();
+  await unsafeCard.locator('.action-menu > summary').click();
+  await unsafeCard.getByRole('button', { name: 'Remove exercise', exact: true }).click();
   await page.getByRole('button', { name: '＋ Add exercise' }).click();
   await page.fill('#add-name', 'Squat');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -122,7 +131,7 @@ function isoDaysAgo(n) {
   await page.locator('.sets .val', { hasText: '62.5 kg × 8' }).waitFor();
 
   // 9. Progress tab -> list -> detail with chart
-  await page.getByRole('button', { name: 'Progress' }).click();
+  await reviewPage('Progress');
   await page.getByRole('button', { name: /Bench press/ }).click();
   await page.getByText('Best set ever').waitFor();
   await checkReadableUI();
@@ -133,7 +142,7 @@ function isoDaysAgo(n) {
   await page.getByText('Estimated 1-rep max (kg)').first().waitFor();
 
   // 10. History shows 2 workouts; tapping the older one opens it
-  await page.getByRole('button', { name: 'History' }).click();
+  await reviewPage('History');
   await page.locator('main').getByText('2 workouts').waitFor();
   await page.screenshot({ scale: 'css', style: '#toast { visibility: hidden !important; }', path: path.join(SHOTS, '4-history.png'), fullPage: true });
   await page.locator('main .list-btn').nth(1).click();
@@ -141,15 +150,19 @@ function isoDaysAgo(n) {
   assert.equal(await page.locator('#workout-date').inputValue(), isoDaysAgo(3));
 
   // 11. Settings: convert every saved weight; Today returns to the current date in one tap
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await reviewPage('Settings');
   await checkReadableUI();
+  await page.getByText('Units', { exact: true }).click();
   await page.getByRole('button', { name: 'Pounds (lb)' }).click();
-  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await page.getByRole('button', { name: 'Train', exact: true }).click();
   assert.equal(await page.locator('#workout-date').inputValue(), isoDaysAgo(0));
   await page.locator('.sets .val', { hasText: '137.79 lb × 8' }).waitFor();
 
   // 12. Delete a set
   const card2 = page.getByRole('region', { name: 'Bench press' });
+  await expandCard(card2);
+  await card2.locator('.action-menu > summary').click();
+  await card2.getByRole('button', { name: 'Manage sets', exact: true }).click();
   await card2.getByRole('button', { name: 'Delete set 2' }).click();
   assert.equal(await card2.locator('.sets li').count(), 1);
 
@@ -159,16 +172,20 @@ function isoDaysAgo(n) {
   assert.ok(overflow <= 0, 'no horizontal overflow on 320px, got ' + overflow);
 
   // Unit changes persist across reloads and convert back without rounding drift.
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await reviewPage('Settings');
+  await page.getByText('Units', { exact: true }).click();
   await page.getByRole('button', { name: 'Kilograms (kg)' }).click();
   await page.reload();
   await page.locator('.sets .val', { hasText: '62.5 kg × 8' }).waitFor();
 
   // A draft in one exercise survives saving a set in another exercise.
   const draftCard = page.getByRole('region', { name: 'Squat', exact: true });
+  await expandCard(draftCard);
   await draftCard.getByLabel('Weight (kg)').fill('107.5');
   await draftCard.getByLabel('Repetitions').fill('7');
+  await expandCard(card2);
   await card2.getByRole('button', { name: 'Save set 2' }).click();
+  await expandCard(draftCard);
   assert.equal(await draftCard.getByLabel('Weight (kg)').inputValue(), '107.5');
   assert.equal(await draftCard.getByLabel('Repetitions').inputValue(), '7');
 
@@ -183,15 +200,17 @@ function isoDaysAgo(n) {
     window.originalSetItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
   });
+  await expandCard(card2);
   await card2.getByRole('button', { name: 'Save set 3' }).click();
   await page.getByRole('status').filter({ hasText: 'Could not save' }).waitFor();
   assert.equal(await card2.locator('.sets li').count(), countBefore);
   await page.evaluate(function () { Storage.prototype.setItem = window.originalSetItem; });
 
   // Keyboard-accessible restore, export and restore the actual downloaded file.
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await reviewPage('Settings');
   await page.evaluate(function () { Object.defineProperty(navigator, 'canShare', { value: function () { return false; }, configurable: true }); });
   const downloadPromise = page.waitForEvent('download');
+  await page.getByText('Backup & restore', { exact: true }).click();
   await page.locator('#export-btn').click();
   const download = await downloadPromise;
   const backupPath = await download.path();
@@ -202,7 +221,7 @@ function isoDaysAgo(n) {
 
   // Desktop and dark-mode layouts remain within the viewport.
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await page.getByRole('button', { name: 'Train', exact: true }).click();
   await page.screenshot({ scale: 'css', style: '#toast { visibility: hidden !important; }', path: path.join(SHOTS, '6-desktop.png'), fullPage: true });
   assert.ok(await page.evaluate(function () { return document.documentElement.scrollWidth <= innerWidth; }));
   await page.setViewportSize({ width: 390, height: 844 });
