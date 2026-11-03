@@ -1,6 +1,6 @@
 {
   "name": "gym-log",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Free, simple progressive-overload gym log. Static website, works on iPhone, data stays on the device.",
   "scripts": {

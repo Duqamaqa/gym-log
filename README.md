@@ -65,8 +65,8 @@ and reports the failure instead of claiming the change was saved.
 
 The interface uses plain instructions and readable control labels. Workout values
 include units and repetitions, set actions are labeled Save/Delete, and controls
-remain at least 44px tall. Functional UI text is at least 14px; smaller lettering
-is confined to decorative artwork. On phones, the save action has a full-width row.
+use at least 44px height for primary touch controls. Functional UI text is at least 14px; smaller lettering
+is confined to decorative artwork. Weight, repetitions, and Save share one compact row on phones.
 
 ## Flexible weekly plans
 
@@ -116,3 +116,10 @@ Additional browser checks: `PLAYWRIGHT=/path/to/node_modules/playwright node
 tests/compact-e2e.js`. They verify the new hierarchy, absence of default destructive
 controls, independent task panes, draft retention, responsive layouts, and keyboard
 behavior. The existing workout and planner suites still exercise the full flows.
+
+## Smaller controls (v1.2.1)
+
+Action buttons use their natural width rather than filling the page. The brand
+header, bottom navigation, exercise rows, workout cards, and activity summaries
+have tighter spacing. Primary touch controls keep a 44px minimum height on touch
+screens; labels remain at least 14px and inputs at least 16px to stay readable.
